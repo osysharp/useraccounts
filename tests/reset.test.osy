@@ -1,0 +1,99 @@
+// A forgotten password: the link is mailed, only its hash is kept, it works once, and not after an hour.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void Resets() {
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+             EmailVerifiedAt = DateTime.UtcNow };
+  new User { Email = "unproven@desk.test", DisplayName = "Una", PasswordHash = Security.HashPassword("correct-horse-2") };
+}
+
+[Test(Resets)]
+void a_reset_link_is_mailed_and_sets_a_new_password_once() {
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) {
+    Assert.Equal(1, MailsTo("ada@desk.test", "Choose a new password"));
+    token = TokenIn("ada@desk.test", "/reset-password/");
+  }
+  Assert.NotEqual("", token);
+
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = ResetPassword(token, "a-whole-new-one"); }
+  Assert.NotEqual("", ticket);
+
+  // The new password opens the door, the old one does not…
+  string withNew = "";
+  string withOld = "x";
+  runas (AuthBootstrap) { withNew = SignIn("ada@desk.test", "a-whole-new-one").Ticket; withOld = SignIn("ada@desk.test", "correct-horse-1").Ticket; }
+  Assert.NotEqual("", withNew);
+  Assert.Equal("", withOld);
+
+  // …and the same link again is refused.
+  runas (AuthBootstrap) { Assert.Throws(() => ResetPassword(token, "and-another-one")); }
+}
+
+[Test(Resets)]
+void only_the_hash_of_the_token_is_kept() {
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  runas (AuthBootstrap) {
+    var token = TokenIn("ada@desk.test", "/reset-password/");
+    var row = PasswordReset.Single(r => r.Account.Email == "ada@desk.test");
+    Assert.NotEqual(token, row.TokenHash);
+    Assert.Equal(Crypto.Sha256Hex(token), row.TokenHash);
+  }
+}
+
+[Test(Resets)]
+void a_link_is_refused_after_an_hour() {
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
+  TestClock.Advance(TimeSpan.FromMinutes(61));
+  runas (AuthBootstrap) { Assert.Throws(() => ResetPassword(token, "a-whole-new-one")); }
+}
+
+[Test(Resets)]
+void a_link_still_works_just_inside_the_hour() {
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
+  TestClock.Advance(TimeSpan.FromMinutes(59));
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = ResetPassword(token, "a-whole-new-one"); }
+  Assert.NotEqual("", ticket);
+}
+
+[Test(Resets)]
+void an_address_with_no_account_is_answered_the_same_and_mailed_nothing() {
+  string answer = "x";
+  runas (AuthBootstrap) { answer = RequestPasswordReset("nobody@desk.test"); }
+  Assert.Equal("", answer);
+  runas (AuthBootstrap) { Assert.Equal(0, MailsTo("nobody@desk.test", "")); }
+}
+
+[Test(Resets)]
+void pressing_the_button_twice_mails_once() {
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("ada@desk.test", "Choose a new password")); }
+}
+
+[Test(Resets)]
+void a_token_that_matches_nothing_changes_nothing() {
+  runas (AuthBootstrap) { Assert.Throws(() => ResetPassword("0000000000000000000000000000000000", "let-me-in-please")); }
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignIn("ada@desk.test", "correct-horse-1").Ticket; }
+  Assert.NotEqual("", ticket);
+}
+
+[Test(Resets)]
+void a_reset_proves_the_address_it_was_mailed_to() {
+  runas (AuthBootstrap) { RequestPasswordReset("unproven@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("unproven@desk.test", "/reset-password/"); }
+  runas (AuthBootstrap) { ResetPassword(token, "a-whole-new-one"); }
+  runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "unproven@desk.test").EmailVerifiedAt); }
+}

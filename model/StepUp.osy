@@ -1,0 +1,167 @@
+// Step-up: proving it is you, NOW — for an action a session left open on a shared computer must not be able to take on
+// its own (a request about your personal data: `CodePurpose.PrivacyRequest`). A six-digit code is mailed to the
+// account's own address and typed back within fifteen minutes; the proof lasts a short while and is spent once, by
+// whatever it was asked for.
+//
+// ⚑ IT PROVES CONTROL OF THE ADDRESS THE ACCOUNT ALREADY HAS — nothing is asked for that the app did not hold (GDPR
+//   Arts. 11(2), 12(6)) — and that address is exactly where an answer about the person may then be sent.
+// ⚑ THE CODE IS THE RUN'S. `StepUpProof` makes it with the kit's one-time codes (fingerprinted, fifteen minutes, five
+//   tries, counted against the account's wrong-code limit — `accounts-one-time-codes-are-fingerprinted-short-lived-and-limited`),
+//   mails it after the commit that asked, and compares it; the row a browser makes holds no code, and nobody reads one.
+// ⚑ AN ARMED FUNCTION DOES NOT KNOW WHO IS SIGNED IN, so this is not one: the account is the signed-in person's, stamped
+//   on the row, and only they may prove it. Their password is never asked for here — it would ride in a durable event.
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Mail;
+using Osysharp.Workflow;
+
+/// Where a step-up stands — tracked by `StepUpProof`. ⚠ Appended, never inserted.
+public enum StepUpState {
+  [Label("Sending the code")] Sending,
+  [Label("Waiting for the code")] Waiting,
+  [Label("Checking the code")] Checked,
+  [Label("Proven")] Proven,
+  [Label("Not proven")] Lapsed,
+}
+
+/// One "prove it is you" — the signed-in person's own, for one purpose.
+///
+/// SECURITY-INVARIANT(accounts-a-step-up-proves-only-its-own-signed-in-account): a step-up is made by the signed-in person
+/// for their own account and proven only by them, with a code mailed to that account's address; nobody writes its
+/// outcome but its run, and it is spent once, by the system. So a session somebody else left open cannot prove anything,
+/// and one person's code can never prove another account. Guarded by tests/stepup.test.osy
+/// `nobody_proves_or_spends_somebody_elses_step_up` and `a_step_up_cannot_be_made_already_proven`.
+public entity StepUp {
+  [CreatedAt] DateTime? CreatedAt;
+  [Required] User Account;
+  CodePurpose Purpose;
+  /// Where the code went — the account's address, written by the run.
+  [MaxLength(255)] string Destination = "";
+  int Misses = 0;
+  DateTime? ProvenAt;
+  /// When the action it was asked for used it — once.
+  DateTime? SpentAt;
+  StepUpState State;                                   // no default — StepUpProof owns it
+  security {
+    allow read, create when IsAuthenticated where Account.Id == user.Id;
+    deny create where Destination != "" || Misses != 0 || ProvenAt != null || SpentAt != null;
+    deny update;
+    deny delete;
+  }
+}
+
+/// Mails the code after the commit that asked for it, then waits for it to be typed in.
+public workflow StepUpProof {
+  Tracks    = StepUp.State;
+  Autostart = true;
+  Initial   = Sending;
+
+  /// The code, typed by the account's own person — raised by `ProveStepUp`.
+  [Authorize(u => u == this.Item.Account)]
+  event Prove(string code);
+
+  state Sending {
+    Expire { Within = TimeSpan.Zero; Accrues = false; }
+    on Expire {
+      var account = this.Item.Account;
+      this.Item.Destination = account.Email;
+      var code = IssueCode(account, CodeChannel.Email, this.Item.Purpose, account.Email);
+      SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.StepUpCode(account, code, this.Item.Purpose),
+                   "step-up-" + this.Item.Id.ToString());
+      goto Waiting;
+    }
+  }
+
+  state Waiting {
+    Expire { Within = CodeLifetime(); Accrues = false; }
+    on Expire { goto Lapsed; }
+    // The arm records what the code was; the state ends on what was recorded — proven, or out of tries.
+    complete when (this.Item.ProvenAt != null || this.Item.Misses >= CodeMissesAllowed()) goto Checked;
+    on Prove(string code) { CheckStepUpCode(this.Item, code); }
+  }
+
+  state Checked {
+    enter {
+      if (this.Item.ProvenAt != null) { goto Proven; }
+      goto Lapsed;
+    }
+  }
+
+  terminal success Proven { }
+  terminal cancel Lapsed { }
+}
+
+// The code against the step-up's live code: proven, or a miss counted on the step-up, the code and the account alike.
+internal void CheckStepUpCode(StepUp s, string code) {
+  var match = CodeMatching(LiveCodes(s.Purpose, s.Destination).Where(c => c.Account == s.Account).ToList(), code);
+  if (match != null) { s.ProvenAt = DateTime.UtcNow; return; }
+  s.Misses = s.Misses + 1;
+}
+
+/// Prove it is you, now, for `purpose`: a code is mailed to your account's address. Answers the step-up — its
+/// `Destination` says where the code went once the mail is on its way (`MaskedEmail`). Asked again within a minute,
+/// or more than five times in an hour, it answers the newest one rather than mailing again.
+public StepUp StartStepUp(CodePurpose purpose) {
+  var me = Session.CurrentUser;
+  if (me == null) { throw new ValidationException("Sign in first."); }
+  var account = User.Single(u => u.Id == me.Id);
+  var now = DateTime.UtcNow;
+  var newest = StepUp.Where(s => s.Account == account && s.Purpose == purpose).OrderByDescending(s => s.CreatedAt).FirstOrDefault();
+  if (newest != null && newest.CreatedAt > now - TimeSpan.FromMinutes(1) && newest.State != StepUpState.Lapsed) { return newest; }
+  if (newest != null && StepUp.Count(s => s.Account == account && s.CreatedAt > now - TimeSpan.FromHours(1)) >= 5) { return newest; }
+  var s = new StepUp { Account = account, Purpose = purpose };
+  UnitOfWork.Commit();
+  return s;
+}
+
+/// The code from that mail, typed in. Answers "" when it proved you, or the sentence to show.
+public string ProveStepUp(StepUp check, string code) {
+  var s = StepUp.FirstOrDefault(x => x.Id == check.Id);
+  if (s == null || s.State == StepUpState.Lapsed) { return "That code no longer works — ask for a new one."; }
+  if (s.State == StepUpState.Proven) { return ""; }
+  if (s.State != StepUpState.Waiting) { return "The code is still on its way — give it a moment."; }
+  try {
+    StepUpProof.RaiseProve(s, code);
+    UnitOfWork.Commit();
+  } catch (ValidationException e) { return e.Message; }
+  var after = StepUp.FirstOrDefault(x => x.Id == check.Id);
+  if (after != null && after.State == StepUpState.Proven) { return ""; }
+  return after != null && after.State == StepUpState.Lapsed ? "That code no longer works — ask for a new one." : WrongCode();
+}
+
+/// Spend a step-up for the action it was asked for: answers the address it proved when `check` is `account`'s, proven
+/// within `within`, for `purpose` and unspent — and marks it spent — or "" otherwise. Called by the action's own run (as
+/// the system): a person cannot spend one, so a proof cannot be replayed.
+public string SpendStepUp(Guid check, Guid account, CodePurpose purpose, TimeSpan within) {
+  var s = StepUp.FirstOrDefault(x => x.Id == check);
+  if (s == null || s.Account.Id != account || s.Purpose != purpose || s.State != StepUpState.Proven || s.SpentAt != null) {
+    return "";
+  }
+  if (s.ProvenAt == null || s.ProvenAt.Value < DateTime.UtcNow - within) { return ""; }
+  s.SpentAt = DateTime.UtcNow;
+  return s.Destination;
+}
+
+/// `ann@example.com` as `a•••@example.com`, for a screen that says where a code went without showing the address.
+public string MaskedEmail(string email) {
+  var at = email.IndexOf("@");
+  if (at <= 1) { return email; }
+  return email.Substring(0, 1) + "•••" + email.Substring(at);
+}
+
+[Email]
+public component AccountStepUpMail(User account, string code, CodePurpose purpose) {
+  subject => $"Your code for {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: $"Your code is {code}.") {
+      EmailHeading("Confirm it is you");
+      EmailText(purpose == CodePurpose.PrivacyRequest
+        ? $"Somebody signed in as {account.Email} is asking {AccountsAppName()} about the personal data it holds. To make sure it is you, type the code below where you were asked for it."
+        : $"Somebody signed in as {account.Email} asked to confirm it is them.");
+      EmailText($"Type this code where you were asked for it: {code}");
+      EmailNote("The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes — and consider changing your password.");
+    }
+  }
+}

@@ -1,0 +1,308 @@
+// The pages, driven as a person drives them — sign up, sign out, sign in, forget the password and get back in.
+// `osy test --pixels` photographs each (Ui.Shot); the README's pictures are these.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+using Osysharp.Storage;
+
+[TestFixture]
+void Door() {
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+             EmailVerifiedAt = DateTime.UtcNow };
+}
+
+void SignUpAs(string name, string email, string password) {
+  Ui.Visit("/sign-up");
+  Ui.Fill("Your name", name);
+  Ui.Fill("Email", email);
+  Ui.Fill("Password", password);
+  Ui.Click("Create account");
+}
+
+void SignInAs(string email, string password) {
+  Ui.Visit("/login");
+  Ui.Fill("Email", email);
+  Ui.Fill("Password", password);
+  Ui.Click("Sign in");
+}
+
+[Test(Door)]
+void a_visitor_is_sent_to_the_sign_in_page_and_can_find_every_way_in() {
+  Ui.Visit("/");
+  Assert.OnPage("/login");
+  Assert.Hidden("Welcome to the desk");
+  Assert.Visible("Kit Test Desk");
+  Assert.Visible("Create an account");
+  Assert.Visible("Forgot your password?");
+  Ui.Shot("sign-in");
+}
+
+// The kit's pages are served by the kit — this app declares none of them — and each is authorized as it declares: the
+// account page states no `[AllowAnonymous]`, so a visitor is sent to sign in rather than shown it.
+[Test(Door)]
+void the_kits_account_page_sends_a_visitor_to_sign_in_first() {
+  Ui.Visit("/account");
+  Assert.OnPage("/login");
+  Assert.Hidden("How you sign in.");
+  Assert.Visible("Sign in");
+}
+
+[Test(Door)]
+void signing_up_on_the_page_lets_you_in() {
+  Ui.Visit("/sign-up");
+  Ui.Shot("sign-up");
+  SignUpAs("Nils", "nils@desk.test", "a-long-password");
+  Ui.Visit("/");
+  Assert.Visible("Welcome to the desk");
+  Assert.Visible("Signed in as nils@desk.test");
+}
+
+[Test(Door)]
+void a_short_password_is_refused_on_the_page_with_the_reason() {
+  SignUpAs("Nils", "nils@desk.test", "short");
+  Assert.Visible("Choose a password of at least 10 characters.");
+  Ui.Visit("/");
+  Assert.OnPage("/login");
+}
+
+[Test(Door)]
+void the_right_password_lets_you_in_and_the_wrong_one_does_not() {
+  SignInAs("ada@desk.test", "not-the-one");
+  Assert.Visible("That address and password do not match an account.");
+  SignInAs("ada@desk.test", "correct-horse-1");
+  Ui.Visit("/");
+  Assert.Visible("Signed in as ada@desk.test");
+  Ui.SignOut();
+  Ui.Visit("/");
+  Assert.OnPage("/login");
+}
+
+[Test(Door)]
+void a_forgotten_password_is_reset_from_the_mailed_link() {
+  Ui.Visit("/login");
+  Ui.Click("Forgot your password?");
+  Assert.OnPage("/forgot-password");
+  Ui.Fill("Email", "ada@desk.test");
+  Ui.Click("Email me a link");
+  Assert.Visible("If there is an account for ada@desk.test, a link to choose a new password is on its way.");
+  Ui.Shot("forgot-password");
+
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
+  Ui.Visit("/reset-password/" + token);
+  Ui.Shot("reset-password");
+  Ui.Fill("New password", "a-whole-new-one");
+  Ui.Fill("The same again", "a-whole-new-one");
+  Ui.Click("Save and sign in");
+  Ui.Visit("/");
+  Assert.Visible("Signed in as ada@desk.test");
+}
+
+[Test(Door)]
+void a_verification_link_confirms_the_address_on_its_page() {
+  SignUpAs("Nils", "nils@desk.test", "a-long-password");
+  Ui.SignOut();
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("nils@desk.test", "/verify-email/"); }
+  Ui.Visit("/verify-email/" + token);
+  // His first proof: he made the account, so he types the password he chose — and is in.
+  Assert.Visible("If you made it, type the password you chose.");
+  Ui.Fill("Your password", "a-long-password");
+  Ui.Click("Confirm and sign in");
+  Assert.Visible("Signed in as nils@desk.test");
+  Ui.Shot("verify-email");
+}
+
+[Test(Door)]
+void the_owner_of_an_address_a_stranger_signed_up_with_takes_the_account_on_the_link_page() {
+  SignUpAs("Mallory", "nils@desk.test", "strangers-password-1");
+  Ui.SignOut();
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("nils@desk.test", "/verify-email/"); }
+  Ui.Visit("/verify-email/" + token);
+  Ui.Click("I did not make this account, or forgot its password");
+  Ui.Fill("New password", "nils-own-password");
+  Ui.Fill("The same again", "nils-own-password");
+  Ui.Click("Save and sign in");
+  Assert.Visible("Signed in as nils@desk.test");
+  Ui.Shot("verify-email-claim");
+  Ui.SignOut();
+  SignInAs("nils@desk.test", "strangers-password-1");
+  Assert.Visible("That address and password do not match an account.");
+}
+
+[Test(Door)]
+void a_signed_in_person_changes_their_password_on_the_account_page() {
+  SignInAs("ada@desk.test", "correct-horse-1");
+  Ui.Visit("/account");
+  Assert.Visible("ada@desk.test");
+  Assert.Visible("Confirmed");
+  Ui.Shot("account");
+  Ui.Fill("Current password", "correct-horse-1");
+  Ui.Fill("New password", "a-brand-new-one");
+  Ui.Click("Change password");
+  Assert.Visible("Your password is changed.");
+  Ui.SignOut();
+  SignInAs("ada@desk.test", "a-brand-new-one");
+  Ui.Visit("/");
+  Assert.Visible("Signed in as ada@desk.test");
+}
+
+[Test(Door)]
+void when_sign_up_is_closed_the_page_says_so_and_offers_no_form() {
+  SignupIsOpen.Stub(() => false);
+  Ui.Visit("/sign-up");
+  Assert.Visible("Kit Test Desk is not open for sign-up.");
+  Assert.Hidden("Create account");
+  Ui.Visit("/login");
+  Assert.Hidden("Create an account");
+}
+
+[Test(Door)]
+void an_apps_own_kind_of_account_is_greeted_as_itself() {
+  runas (AuthBootstrap) { new Employee { Email = "eve@desk.test", PasswordHash = Security.HashPassword("battery-staple-2"), Department = "Ops" }; }
+  SignInAs("eve@desk.test", "battery-staple-2");
+  Ui.Visit("/");
+  Assert.Visible("Signed in as eve@desk.test");
+}
+
+// ── two-step sign-in, on the pages ───────────────────────────────────────────────────────────────────────────────
+
+[TestFixture]
+void TwoStepDoor() {
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+             EmailVerifiedAt = DateTime.UtcNow };
+  // An admin, whom this app requires to use two-step sign-in, who has not set it up.
+  var root = new User { Email = "root@desk.test", DisplayName = "Root", PasswordHash = Security.HashPassword("correct-horse-9"),
+                        EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = root, Role = AppRole.Admin };
+}
+
+/// The phone's code for the NEXT step — accepted now, and not the one enrolment spent.
+string PhoneNext(string key) { return Totp.Code(key, DateTime.UtcNow.AddSeconds(30)); }
+
+[Test(TwoStepDoor)]
+void with_two_step_on_the_sign_in_page_asks_for_the_code_after_the_password() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  SignInAs("ada@desk.test", "correct-horse-1");
+  Assert.Visible("Open your authenticator app and type the six-digit code it shows for this account.");
+  Ui.Shot("two-step-code");
+  Ui.Fill("Code", Totp.Code(key, DateTime.UtcNow.AddMinutes(10)));
+  Ui.Click("Continue");
+  Assert.Visible("That code is not right — type the newest one your app shows.");
+  // Not signed in yet: the password alone got no ticket.
+  Ui.Visit("/");
+  Assert.OnPage("/login");
+  SignInAs("ada@desk.test", "correct-horse-1");
+  Ui.Fill("Code", PhoneNext(key));
+  Ui.Click("Continue");
+  // Signing in goes to the home page by itself — wait for it rather than overtake it with a visit of our own.
+  Assert.Visible("Welcome to the desk");
+  Assert.Visible("Signed in as ada@desk.test");
+}
+
+[Test(TwoStepDoor)]
+void an_account_that_must_use_it_sets_it_up_before_any_page() {
+  SignInAs("root@desk.test", "correct-horse-9");
+  Assert.Visible("Kit Test Desk asks for two-step sign-in on your account. Set it up now — it takes a minute.");
+  Assert.Visible("Or type this key into the app:");
+  Assert.Visible("Turn on two-step sign-in");
+  Ui.Shot("two-step-setup");
+  Ui.Fill("Code from the app", "000000");
+  Ui.Click("Turn on two-step sign-in");
+  Assert.Visible("That code does not match");
+  // No ticket yet — every page still sends it to sign in.
+  Ui.Visit("/");
+  Assert.OnPage("/login");
+}
+
+[Test(TwoStepDoor)]
+void the_account_page_sets_up_two_step_sign_in() {
+  SignInAs("ada@desk.test", "correct-horse-1");
+  Ui.Visit("/account");
+  Assert.Visible("Two-step sign-in");
+  Assert.Visible("Off");
+  Ui.Click("Set up two-step sign-in");
+  Assert.Visible("Type your current password first — setting up two-step sign-in asks for it.");
+  Ui.Fill("Current password", "correct-horse-1");
+  Ui.Click("Set up two-step sign-in");
+  Assert.Visible("Or type this key into the app:");
+  Ui.Shot("account-two-step-setup");
+}
+
+[Test(TwoStepDoor)]
+void with_two_step_on_the_account_page_hands_out_new_recovery_codes_for_a_code() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  SignInAs("ada@desk.test", "correct-horse-1");
+  Ui.Fill("Code", PhoneNext(key));
+  Ui.Click("Continue");
+  Assert.Visible("Welcome to the desk");
+  Ui.Visit("/account");
+  Assert.Visible("On");
+  Assert.Visible("Signing in asks for a code from your app. 10 recovery codes left.");
+  Ui.Fill("Current password", "correct-horse-1");
+  Ui.Fill("Code from your app", on.RecoveryCodes[0]);
+  Ui.Click("New recovery codes");
+  Assert.Visible("Your recovery codes");
+  Ui.Shot("recovery-codes");
+}
+
+[Test(Door)]
+void the_apps_logo_is_on_every_sign_in_screen_without_taking_a_page_over() {
+  runas (AuthBootstrap) {
+    File.WriteAllText("public/brand/desk.svg",
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><rect width='40' height='40' rx='10' fill='#4f46e5'/>"
+      + "<path d='M12 20h16M20 12v16' stroke='#ffffff' stroke-width='4' stroke-linecap='round'/></svg>");
+  }
+  DeskLogoUrl.Stub(() => File.Url("public/brand/desk.svg"));
+  Ui.Visit("/login");
+  Assert.Visible("Kit Test Desk");
+  Ui.Shot("sign-in-with-logo");
+  Ui.Visit("/forgot-password");
+  Assert.Visible("Kit Test Desk");
+}
+
+// ── proving an address by its code, and signing in by text, on the pages ────────────────────────────────────────
+
+[Test(Door)]
+void a_sign_up_that_must_prove_its_address_types_the_code_from_the_mail_and_is_in() {
+  AddressProofRequired.Stub(() => true);
+  SignUpAs("Nils", "nils@desk.test", "a-long-password");
+  Assert.Visible("Check your mail at nils@desk.test.");
+  Ui.Shot("sign-up-code");
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("nils@desk.test"); }
+  Ui.Fill("Code from the mail", code);
+  Ui.Click("Confirm");
+  Assert.Visible("Welcome to the desk");
+  Assert.Visible("Signed in as nils@desk.test");
+}
+
+[Test(Door)]
+void a_sign_up_that_must_prove_its_address_is_not_in_before_the_code() {
+  AddressProofRequired.Stub(() => true);
+  SignUpAs("Nils", "nils@desk.test", "a-long-password");
+  Assert.Visible("Check your mail at nils@desk.test.");
+  Ui.Visit("/");
+  Assert.OnPage("/login");
+}
+
+[Test(Door)]
+void a_proven_number_signs_in_by_text_on_the_sign_in_page() {
+  runas (AuthBootstrap) { SetPhone("ada@desk.test", "+46700000001"); MarkPhoneProven("ada@desk.test"); }
+  Ui.Visit("/login");
+  Ui.Click("Sign in with a text message");
+  Ui.Fill("Phone number", "+46 70 000 00 01");
+  Ui.Click("Text me a code");
+  Assert.Visible("If that number may sign in here, a six-digit code is on its way.");
+  Ui.Shot("sign-in-by-text");
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000001"); }
+  Ui.Fill("Code from the text", code);
+  Ui.Click("Sign in");
+  Assert.Visible("Welcome to the desk");
+  Assert.Visible("Signed in as ada@desk.test");
+}

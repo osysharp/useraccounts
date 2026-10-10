@@ -1,0 +1,505 @@
+// The sign-in flow. Every function here is an `[AuthMethod]`, wired below into `app.AuthBootstrap`, so each runs as the
+// ephemeral principal bearing the app's `Authenticator` role — the only caller that may read a hash or make an account.
+//
+// ⚑ AN ARMED FUNCTION DOES NOT KNOW WHO IS SIGNED IN — it runs as the sign-in flow, not as the caller. So the ones a
+//   signed-in person uses (change password, change address) take the address and the CURRENT password, and act only
+//   when that password verifies: a session left open on a shared computer cannot be turned into a new password or a new
+//   address.
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Mail;
+
+// SECURITY-INVARIANT(accounts-bootstrap-wires-every-flow): `use Osysharp.UserAccounts;` states the app's sign-in wiring —
+// every flow's `[AuthMethod]` in its slot, as the app's `Authenticator` role — so no app can ship a sign-in page whose
+// reset or verification is refused for every visitor because a slot was forgotten. An app that states its own
+// `app.AuthBootstrap` replaces this whole. Guarded by tests/*.test.osy (every flow runs through it).
+//
+// ⚑ NO `LoginPage` SLOT: the app puts `SignInScreen` at `/login` (ui/Pages.osy), which is where the platform sends a
+//   visitor who is not signed in when an app names no login page — and a package cannot name the app's page.
+app.AuthBootstrap = new AuthBootstrap {
+  Role                 = role.Authenticator,
+  Login                = SignIn,
+  Signup               = SignUp,
+  PasswordResetRequest = RequestPasswordReset,
+  PasswordReset        = ResetPassword,
+  PasswordChange       = ChangePassword,
+  EmailChange          = ChangeEmail,
+  EmailVerify          = VerifyEmail,
+  SecondFactorSignIn        = SignInWithCode,
+  SecondFactorEnable        = EnableSecondFactor,
+  SecondFactorDisable       = DisableSecondFactor,
+  SecondFactorRecoveryCodes = NewRecoveryCodes,
+  OAuthSignIn               = SignInWithProvider,
+  OAuthLink                 = LinkProvider,
+  OAuthUnlink               = UnlinkProvider,
+  EmailVerifyRequest        = RequestVerification,
+  EmailVerifyCode           = VerifyEmailCode,
+  PhoneVerify               = ProvePhone,
+  PhoneSignIn               = SignInWithPhone,
+  SmsSecondStep             = SetSmsSecondStep,
+};
+
+// The fields that hold the login and the credential — what `osy user add` and the console sign-in read. The platform
+// makes an account as the type declaring the credential (`User`), and never records the hash in the audit trail.
+// `SecondFactorField` is what makes those platform paths REFUSE an account with two-step sign-in on: they know only a
+// password, and a password alone must not sign that account in.
+app.Auth = new PasswordAuth { LoginField = Email, PasswordField = PasswordHash, SecondFactorField = TotpSecret };
+
+/// Sign in. Answers a `SignInStep`: a ticket for `Session.SignIn`; or, for an account with two-step sign-in, a
+/// challenge for `SignInWithCode` and no ticket; or `MustEnrol` for an account that must set two-step sign-in up first;
+/// or, when the app requires a proven address and this one is not, `MustVerify` — a mail with a code and a link is on its
+/// way, and `VerifyEmailCode` takes the code. All empty for an unknown address, a wrong password and an account that is
+/// not active alike, so the answer never says which addresses have accounts.
+///
+/// SECURITY-INVARIANT(accounts-sign-in-miss-costs-a-hash): every refusal spends one password verification, so a miss on
+/// an unknown address takes as long as a wrong password on a known one and the timing cannot enumerate accounts.
+/// Guarded by tests/signin.test.osy (every refusal answers an empty step).
+[AuthMethod]
+public SignInStep SignIn(string email, string password) {
+  var account = User.FirstOrDefault(u => u.Email == NormalisedEmail(email));
+  if (account == null || !account.IsActive || account.PasswordHash == null) {
+    Security.VerifyPassword(password);
+    return new SignInStep();
+  }
+  if (!Security.VerifyPassword(password, account.PasswordHash)) { return new SignInStep(); }
+  if (account.EmailVerifiedAt == null) {
+    // An account that has not proven its address gets a fresh code (and link) whenever it signs in without a live one.
+    EnsureVerification(account);
+    // SECURITY-INVARIANT(accounts-no-ticket-before-the-address-is-proven): with `RequireVerifiedEmail`, or for an account
+    // the app's `AddressProof` names, a right password on an unproven address answers the step that proves it — never a
+    // ticket. Guarded by tests/verify-code.test.osy.
+    if (MustProveAddress(account)) { return new SignInStep { MustVerify = true, Account = account.Email }; }
+  }
+  return ContinueSignIn(account);
+}
+
+/// Must `account` prove its address before it is signed in — everybody must (`RequireVerifiedEmail`), or the app says this
+/// one must (`AddressProof`)?
+bool MustProveAddress(User account) {
+  var setup = App.Setting<AccountsSetup>();
+  return setup.RequireVerifiedEmail || setup.AddressProof.Required(account);
+}
+
+/// What follows a verified first step: a challenge when two-step sign-in is on (SECURITY-INVARIANT
+/// accounts-no-ticket-before-the-second-factor, SecondFactor.osy), `MustEnrol` when the app requires it and it is off,
+/// else the ticket. PUBLIC for an app's own door (an invitation, an application form) — an `[AuthMethod]` that has
+/// proven who this is in its own way ends here, so the second factor and `AccountsSetup.Events` apply to it too.
+///
+/// SECURITY-INVARIANT(accounts-sms-is-not-a-required-second-factor): an account the app REQUIRES a second factor of is
+/// asked for an authenticator app (or to set one up) whether or not it chose a texted code — the texted step is checked
+/// only after `Required`, and `SignInWithCode` refuses a texted code for such an account. A SIM swap or a port-out moves
+/// a number to somebody else (NIST 800-63B "restricted"), so it is an account's choice, never an app's demand. Guarded by
+/// tests/sms.test.osy.
+public SignInStep ContinueSignIn(User account) {
+  if (account.TotpSecret != null) {
+    var token = Security.RandomId(32);
+    new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime() };
+    return new SignInStep { Challenge = token, ChallengeBy = "app" };
+  }
+  if (App.Setting<AccountsSetup>().SecondFactor.Required(account)) { return MustEnrol(account); }
+  if (TextedSecondStep(account)) {
+    var token = Security.RandomId(32);
+    var challenge = new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime() };
+    TextCode(account, CodePurpose.SecondStep, account.Phone!, challenge);
+    return new SignInStep { Challenge = token, ChallengeBy = "sms", Account = MaskedPhone(account.Phone!) };
+  }
+  return new SignInStep { Ticket = Admit(account) };
+}
+
+/// Does `account` sign in with a texted code after its password — it chose to, the app offers it, and its number is proven?
+bool TextedSecondStep(User account) {
+  return account.SmsSecondStep && account.Phone != null && account.PhoneVerifiedAt != null
+    && App.Setting<AccountsSetup>().SmsSecondStep;
+}
+
+/// The step for an account that must set two-step sign-in up before it gets a ticket: an enrolment token, and the
+/// address to label the authenticator app with.
+SignInStep MustEnrol(User account) {
+  return new SignInStep { MustEnrol = true, Enrolment = NewEnrolment(account), Account = account.Email };
+}
+
+/// Make an account and sign it in — or, when the app requires a proven address, answer `MustVerify` (a mail with a code and
+/// a link is on its way; `VerifyEmailCode` takes the code) and no ticket; or, when the app requires two-step sign-in of it,
+/// `MustEnrol`. Throws the sentence to show when it cannot (a closed app, a short password, not an address).
+///
+/// SECURITY-INVARIANT(accounts-sign-up-does-not-say-who-has-an-account): an address that already has an account is answered
+/// exactly as a new one is when the app requires a proven address — the same `MustVerify` step, after the same hashing time
+/// — and the MAIL says which: a new address is sent a code to confirm it; a taken one is told it already has an account,
+/// with the way to sign in or reset. With `RequireVerifiedEmail` off a new account is signed in at once, which a taken
+/// address cannot be — so there the difference shows to whoever tries (see the kit's docs); the right password for the
+/// taken address signs its owner in instead of refusing them. Guarded by tests/verify-code.test.osy.
+[AuthMethod]
+public SignInStep SignUp(string email, string password, string name) {
+  var setup = App.Setting<AccountsSetup>();
+  if (!setup.SignupOpen) {
+    throw new ValidationException($"{AccountsAppName()} is not open for sign-up — ask the person who runs it for an account.");
+  }
+  var address = NormalisedEmail(email);
+  if (!LooksLikeEmail(address)) { throw new ValidationException("That does not look like an email address."); }
+  var problem = PasswordProblem(password, address);
+  if (problem != "") { throw new ValidationException(problem); }
+  if (Principal.Any(p => p.Email == address)) {
+    var owner = User.FirstOrDefault(u => u.Email == address);
+    if (!setup.RequireVerifiedEmail && owner != null && owner.IsActive && owner.PasswordHash != null
+        && Security.VerifyPassword(password, owner.PasswordHash)) {
+      // It is them: signing up with their own address and password signs them in — as signing in would, so an address
+      // the app wants proven first is proven first.
+      if (owner.EmailVerifiedAt == null && setup.AddressProof.Required(owner)) {
+        EnsureVerification(owner);
+        return new SignInStep { MustVerify = true, Account = address };
+      }
+      return ContinueSignIn(owner);
+    }
+    // Spend the time a new account's hash takes, so the answer's timing does not say either.
+    Security.HashPassword(password);
+    TellAddressIsTaken(address);
+    return new SignInStep { MustVerify = true, Account = address };
+  }
+  var first = !Principal.Any(p => p.Email != address);
+  var now = DateTime.UtcNow;
+  // The app's own kind of account, when it has one (`AccountKinds`); the kit sets what sign-in rests on.
+  var account = setup.Kinds.New(address, name.Trim());
+  if (account.Email != address) {
+    throw new ValidationException("The app's AccountKinds.New made an account for another address — it must use the one it was given.");
+  }
+  account.PasswordHash = Security.HashPassword(password);
+  account.PasswordChangedAt = now;
+  // ⚑ NOT `LastLoginAt`: a sign-up that must prove its address first is not signed in, and `Admit` stamps it when it is.
+  account.DisplayName = name.Trim() != "" ? name.Trim() : address.Substring(0, address.IndexOf("@"));
+  GrantNewAccountRoles(account, first);
+  SendCheck(account, address, false);
+  if (MustProveAddress(account)) { return new SignInStep { MustVerify = true, Account = address }; }
+  if (setup.SecondFactor.Required(account)) { return MustEnrol(account); }
+  return new SignInStep { Ticket = Admit(account) };
+}
+
+/// Tell `address` it already has an account — the mail a sign-up for a taken address sends instead of a code. Once a
+/// minute, so nobody can fill a stranger's inbox from the sign-up page.
+/// The roles a NEW account is given — by a password sign-up and a provider one alike.
+/// SECURITY-INVARIANT(accounts-signup-grants-only-the-apps-choice): a new account is given the role the app named
+/// (`SignupRole`) and, when it is the first account, `FirstAccountRole` — never a role the visitor chose. Guarded by
+/// tests/signin.test.osy (the_first_account_ever_is_given_the_first_account_role_too).
+/// Each is told to the app (`RolesSetup.Events.Granted`) by a run, as the system, in this same commit — RolesTold.osy.
+void GrantNewAccountRoles(User account, bool first) {
+  var setup = App.Setting<AccountsSetup>();
+  var given = new List<role>();
+  if (setup.SignupRole != null) { given.Add(setup.SignupRole.Value); }
+  // …and the first account's, unless it is the role every new account was just given: one row per person and role.
+  if (first && setup.FirstAccountRole != null && !given.Contains(setup.FirstAccountRole.Value)) {
+    given.Add(setup.FirstAccountRole.Value);
+  }
+  foreach (var r in given) {
+    new RoleGrant { Member = account, Role = r };
+    new RoleGivenAtSignup { Member = account, Role = r };
+  }
+}
+
+void TellAddressIsTaken(string address) {
+  var mail = App.Setting<AccountsSetup>().Mails.AccountExists(address, AccountsLink("/login"), AccountsLink("/forgot-password"));
+  var aMinuteAgo = DateTime.UtcNow - TimeSpan.FromMinutes(1);
+  if (OutgoingMail.Any(m => m.To == address && m.Subject == mail.Subject && m.CreatedAt > aMinuteAgo)) { return; }
+  SendRendered(address, mail);
+}
+
+/// Mail a link to choose a new password, if the address has an account. Answers "" either way — the same answer for an
+/// address with no account is what keeps this from telling a stranger who has one.
+[AuthMethod]
+public string RequestPasswordReset(string email) {
+  var account = User.FirstOrDefault(u => u.Email == NormalisedEmail(email));
+  // A managed account (Managed.osy) has no address to mail: it is given one, proven, before anybody can reset it.
+  if (account == null || !account.IsActive || IsManaged(account)) { return ""; }
+  var now = DateTime.UtcNow;
+  // One request a minute: pressing the button twice is one mail, and nobody can flood a person's inbox from the page.
+  var askedAMinuteAgo = now + ResetLifetime() - TimeSpan.FromMinutes(1);
+  if (PasswordReset.Any(r => r.Account == account && r.UsedAt == null && r.ExpiresAt > askedAMinuteAgo)) {
+    return "";
+  }
+  var token = Security.RandomId(32);
+  new PasswordReset { Account = account, TokenHash = TokenHash(token), ExpiresAt = now + ResetLifetime() };
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasswordReset(account, AccountsLink($"/reset-password/{token}")),
+               "reset-" + TokenHash(token));
+  return "";
+}
+
+/// Choose a new password with a mailed token, and sign in. Throws the sentence to show when the token is wrong, used or
+/// old. Receiving the link proves the address, so an unverified one is verified too. An account with two-step sign-in
+/// gets its new password and NO ticket ("") — the mailbox is not the second factor, so it then signs in as usual.
+[AuthMethod]
+[SuppressWarning("cost-unbounded-read")]   // one account's outstanding reset links — each new one is rate-limited
+public string ResetPassword(string token, string password) {
+  var reset = PasswordReset.FirstOrDefault(r => r.TokenHash == TokenHash(token));
+  var now = DateTime.UtcNow;
+  if (reset == null || reset.UsedAt != null || reset.ExpiresAt < now || !reset.Account.IsActive) {
+    throw new ValidationException("That link has expired or was already used — ask for a new one.");
+  }
+  var account = reset.Account;
+  var problem = PasswordProblem(password, account.Email);
+  if (problem != "") { throw new ValidationException(problem); }
+  // Every outstanding link for the account dies with this one: the one that worked is the one that counts.
+  foreach (var other in PasswordReset.Where(r => r.Account == account && r.UsedAt == null).ToList()) { other.UsedAt = now; }
+  reset.UsedAt = now;
+  if (account.EmailVerifiedAt == null) {
+    // The first proof of the address: whatever was set up before it was set up by somebody who had not shown the address
+    // is theirs — SECURITY-INVARIANT(accounts-first-proof-claims-the-account).
+    StartOver(account);
+    account.EmailVerifiedAt = now;
+  }
+  // SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change): whoever is signed in with the old password —
+  // on any browser, on any node — is signed out when this commits. The ticket this answers is issued after, so it is
+  // not among them. Guarded by tests/sessions.test.osy.
+  Security.EndOtherSessions(account.Id);
+  account.PasswordHash = Security.HashPassword(password);
+  account.PasswordChangedAt = now;
+  if (account.TotpSecret != null || TextedSecondStep(account)) { return ""; }
+  // An account the app requires two-step sign-in of, and that has none yet, is not signed in by a mailed link either:
+  // the password is set and it signs in as usual, which takes it through setting the factor up.
+  if (App.Setting<AccountsSetup>().SecondFactor.Required(account)) { return ""; }
+  return Admit(account);
+}
+
+/// Change the password, given the current one — and, when two-step sign-in is on, a current `code`. Answers a fresh
+/// ticket, or throws the sentence to show. The account is told by mail — the way its owner finds out when it was not them.
+[AuthMethod]
+public string ChangePassword(string email, string currentPassword, string newPassword, string code = "") {
+  var account = Verified(email, currentPassword);
+  if (account.TotpSecret != null) { RequireCode(account, code); }
+  var problem = PasswordProblem(newPassword, account.Email);
+  if (problem != "") { throw new ValidationException(problem); }
+  var now = DateTime.UtcNow;
+  // SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change): every other session of the account ends when
+  // this commits; the one changing the password stays signed in. Guarded by tests/sessions.test.osy.
+  Security.EndOtherSessions(account.Id);
+  account.PasswordHash = Security.HashPassword(newPassword);
+  account.PasswordChangedAt = now;
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasswordChanged(account));
+  return Security.IssueJwt(account.Id, account.Email);
+}
+
+/// Ask to move the account to a new address, given the current password — and, when two-step sign-in is on, a current
+/// `code`: an address is how a password is reset, so moving it is as sensitive as the password. Nothing changes yet: a
+/// link goes to the NEW address, and the account moves when it is opened; the OLD address is told. Asking for the
+/// account's own address sends a fresh verification of it. Answers "", or throws the sentence to show.
+[AuthMethod]
+public string ChangeEmail(string email, string currentPassword, string newEmail, string code = "") {
+  var account = Verified(email, currentPassword);
+  if (account.TotpSecret != null) { RequireCode(account, code); }
+  var address = NormalisedEmail(newEmail);
+  if (!LooksLikeEmail(address)) { throw new ValidationException("That does not look like an email address."); }
+  if (address == account.Email) {
+    if (account.EmailVerifiedAt == null) { SendCheck(account, address, false); }
+    return "";
+  }
+  if (Principal.Any(p => p.Email == address)) { throw new ValidationException("Another account already uses that address."); }
+  SendCheck(account, address, true);
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.AddressChangeRequested(account, address));
+  return "";
+}
+
+/// Mail a fresh link that proves the account's address, when the address has an active account that has not proven
+/// it yet — what "send me a new link" and an operator's "resend" ask for. Answers "" whether or not it did anything,
+/// so it never tells a stranger which addresses have accounts; asked twice within a minute, it mails once.
+[AuthMethod]
+public string RequestVerification(string email) {
+  var account = User.FirstOrDefault(u => u.Email == NormalisedEmail(email));
+  if (account == null || !account.IsActive || account.EmailVerifiedAt != null || IsManaged(account)) { return ""; }
+  var aMinuteAgo = DateTime.UtcNow + VerificationLifetime() - TimeSpan.FromMinutes(1);
+  if (EmailCheck.Any(c => c.Account == account && !c.IsChange && c.UsedAt == null && c.ExpiresAt > aMinuteAgo)) { return ""; }
+  SendCheck(account, account.Email, false);
+  return "";
+}
+
+/// Open a verification link: prove the address it went to, and — for an address change — move the account to it.
+/// Answers `Proven` (with the address in `Account`) and no ticket — the person signs in as usual; or, on the FIRST proof
+/// of an account that already has a password, `MustConfirmPassword` and nothing proven until it is asked again with that
+/// `password` (proven, and signed in as a sign-in would be) or a `newPassword` (the account starts over for whoever
+/// holds the address — see `Claim`). Throws the sentence to show.
+[AuthMethod]
+public SignInStep VerifyEmail(string token, string password = "", string newPassword = "") {
+  var check = EmailCheck.FirstOrDefault(c => c.TokenHash == TokenHash(token));
+  var now = DateTime.UtcNow;
+  if (check == null || check.UsedAt != null || check.ExpiresAt < now || !check.Account.IsActive) {
+    throw new ValidationException("That link has expired or was already used — sign in to have a new one sent.");
+  }
+  if (IsFirstProofOfAPassword(check)) { return Claim(check, password, newPassword); }
+  return new SignInStep { Proven = true, Account = Prove(check).Email };
+}
+
+/// Prove an address with the six-digit code its mail carried — the other half of the link, typed on the sign-up or
+/// sign-in screen (or the account page, for an address it is moving to). Answers the step that follows, as a sign-in
+/// would: the ticket, a code from an authenticator, or setting one up — receiving the mail is proof enough to sign in, as
+/// a reset link is. On the FIRST proof of an account that already has a password, the `password` the sign-up or sign-in
+/// screen just took comes with the code (so that person is not asked again); without it the answer is
+/// `MustConfirmPassword`, as for the link. Throws the sentence to show for a wrong or spent code.
+[AuthMethod]
+public SignInStep VerifyEmailCode(string email, string code, string password = "", string newPassword = "") {
+  var address = NormalisedEmail(email);
+  var match = CodeMatching(LiveCodes(CodePurpose.ProveAddress, address), code);
+  if (match == null || match.Check == null || !match.Account.IsActive) {
+    UnitOfWork.Commit();   // the miss is kept: the throw below would discard it
+    throw new ValidationException(WrongCode());
+  }
+  if (IsFirstProofOfAPassword(match.Check)) {
+    var step = Claim(match.Check, password, newPassword);
+    // Nothing is proven yet, so nothing is spent: the same code comes back with the password, or a new one.
+    if (step.MustConfirmPassword) { match.UsedAt = null; }
+    return step;
+  }
+  var account = Prove(match.Check);
+  return ContinueSignIn(account);
+}
+
+/// Is proving `check` the first time anybody has shown the account's own address is theirs, on an account that already
+/// has a password? Then that password was chosen by somebody who had not — the person who signed up, or a stranger who
+/// signed up first with this address — and receiving the mail alone does not say which.
+bool IsFirstProofOfAPassword(EmailCheck check) {
+  return !check.IsChange && check.Account.EmailVerifiedAt == null && check.Account.PasswordHash != null;
+}
+
+/// The first proof of an account whose password was chosen before its address was proven. The mail proved who holds the
+/// address; the password says whether that is who chose it:
+///   - `password` is the account's: the person who made the account is the one proving it — proven, and signed in as a
+///     sign-in would be. (The sign-up and sign-in screens pass the password they just took, so nobody is asked twice.)
+///   - `newPassword`: whoever holds the address takes the account — proven, and started over (`StartOver`): the old
+///     password, two-step sign-in, recovery codes, a phone and every linked provider are cleared, then the new password is
+///     set and the step after a sign-in follows.
+///   - neither: nothing proven and nothing spent — `MustConfirmPassword`, so the page asks for one or the other.
+///
+/// SECURITY-INVARIANT(accounts-first-proof-claims-the-account): an address proven for the first time on an account that
+/// already has a password is proven ONLY together with that password, or by choosing a new one — and a new one clears
+/// every way in set up before the proof. So a stranger who signs up first with somebody else's address (account
+/// pre-hijacking) loses the account to the address's owner the moment the owner proves it, instead of keeping a password,
+/// an authenticator or a linked provider the owner never knew of. Guarded by tests/pre-hijack.test.osy.
+SignInStep Claim(EmailCheck check, string password, string newPassword) {
+  var account = check.Account;
+  // A link to an address the account has since left proves nothing — refused before anything is asked, as `Prove` would.
+  if (check.Email != account.Email) { throw new ValidationException("That link is for an address this account no longer uses."); }
+  if (newPassword != "") {
+    var problem = PasswordProblem(newPassword, account.Email);
+    if (problem != "") { throw new ValidationException(problem); }
+    StartOver(account);
+    Prove(check);
+    account.PasswordHash = Security.HashPassword(newPassword);
+    account.PasswordChangedAt = DateTime.UtcNow;
+    return ContinueSignIn(account);
+  }
+  if (password != "") {
+    if (!Security.VerifyPassword(password, account.PasswordHash!)) {
+      throw new ValidationException("That is not the password this account was made with. Type it again — or, if you did not make this account or do not know its password, choose a new one.");
+    }
+    return ContinueSignIn(Prove(check));
+  }
+  return new SignInStep { MustConfirmPassword = true, Account = account.Email };
+}
+
+/// Clear every way into `account` that was set up before its address was proven — by whoever held the password then:
+/// the password, two-step sign-in and its recovery codes, a phone and its texted step, every linked provider, and every
+/// outstanding challenge, reset link and code. What the account's rows ARE (its name, its roles, its work) stays.
+[SuppressWarning("cost-unbounded-read")]   // one account's outstanding codes, links and challenges, spent at once
+void StartOver(User account) {
+  var now = DateTime.UtcNow;
+  // …and every session it already has: a stranger who signed up first and was signed in then is signed out now
+  // (SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change); guarded by tests/pre-hijack.test.osy).
+  Security.EndOtherSessions(account.Id);
+  account.PasswordHash = null;
+  account.TotpSecret = null;
+  account.TotpLastStep = -1;
+  account.SecondFactorOnAt = null;
+  account.Phone = null;
+  account.PhoneVerifiedAt = null;
+  account.SmsSecondStep = false;
+  foreach (var code in RecoveryCode.Where(c => c.Account == account && c.UsedAt == null).ToList()) { code.UsedAt = now; }
+  foreach (var challenge in SignInChallenge.Where(c => c.Account == account && c.UsedAt == null).ToList()) { challenge.UsedAt = now; }
+  foreach (var reset in PasswordReset.Where(r => r.Account == account && r.UsedAt == null).ToList()) { reset.UsedAt = now; }
+  foreach (var code in OneTimeCode.Where(c => c.Account == account && c.Purpose != CodePurpose.ProveAddress && c.UsedAt == null).ToList()) {
+    code.UsedAt = now;
+  }
+  foreach (var provider in Security.OAuthLinkedProviders(account.Id)) { Security.UnlinkOAuth(account.Id, provider); }
+}
+
+/// Prove the address `check` was sent to — the account's own, or (a change) the one it moves to — and spend every other
+/// outstanding link and code for the account. Answers the account.
+[SuppressWarning("cost-unbounded-read")]   // one account's outstanding address links and codes
+User Prove(EmailCheck check) {
+  var now = DateTime.UtcNow;
+  var account = check.Account;
+  if (check.IsChange) {
+    ConfirmAddressChange(check);
+  } else if (check.Email != account.Email) {
+    // The account moved to another address after this link was sent; it proves an address the account no longer has.
+    throw new ValidationException("That link is for an address this account no longer uses.");
+  }
+  check.UsedAt = now;
+  account.EmailVerifiedAt = now;
+  // Any other outstanding link — and code — for the account is spent: the address it proves is settled.
+  foreach (var other in EmailCheck.Where(c => c.Account == account && c.UsedAt == null).ToList()) { other.UsedAt = now; }
+  foreach (var code in OneTimeCode.Where(c => c.Account == account && c.Purpose == CodePurpose.ProveAddress && c.UsedAt == null).ToList()) {
+    code.UsedAt = now;
+  }
+  return account;
+}
+
+/// Move the account to the new address `check` proved — the ONE place an account's own address changes (`User`'s
+/// `deny update Email except via ConfirmAddressChange`): only after a message sent to that address came back. Called by
+/// `Prove` for a change, inside the sign-in flow that opened the link or took the code.
+///
+/// SECURITY-INVARIANT(accounts-an-address-moves-only-when-the-new-one-confirms): no caller — the account itself, the
+/// app's staff, a client's unit of work, an API call — writes `Email` on an account; it moves here, once the new address
+/// received the link or the code, or in the desk's recorded `ChangeAddressFor` run (AssistedChange.osy). Guarded by
+/// tests/email.test.osy (an_address_changes_only_through_its_confirmation).
+[Server, Authorize(IsAuthenticator)]
+public void ConfirmAddressChange(EmailCheck check) {
+  var account = check.Account;
+  if (!check.IsChange) { throw new ValidationException("That link proves an address; it does not move the account."); }
+  if (Principal.Any(p => p.Email == check.Email && p.Id != account.Id)) {
+    throw new ValidationException("Another account has taken that address since you asked. Choose another.");
+  }
+  // SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change): moving the address moves where a password is
+  // reset to, so it is as much a change of the account's way in as a new password — every other session ends when
+  // this commits, as after a password change. Guarded by tests/sessions.test.osy.
+  Security.EndOtherSessions(account.Id);
+  account.Email = check.Email;
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// The account `email` names, when `password` is its password — else throws, having spent a verification either way.
+User Verified(string email, string password) {
+  var account = User.FirstOrDefault(u => u.Email == NormalisedEmail(email));
+  if (account == null || !account.IsActive || account.PasswordHash == null) {
+    Security.VerifyPassword(password);
+    throw new ValidationException("That is not your current password.");
+  }
+  if (!Security.VerifyPassword(password, account.PasswordHash)) {
+    throw new ValidationException("That is not your current password.");
+  }
+  return account;
+}
+
+/// Mail `address` what proves it — a link AND a six-digit code, either one enough — for the account's own address
+/// (`isChange` false) or the one it wants to move to. The link works for three days, the code for fifteen minutes.
+void SendCheck(User account, string address, bool isChange) {
+  var token = Security.RandomId(32);
+  var check = new EmailCheck { Account = account, Email = address, IsChange = isChange, TokenHash = TokenHash(token),
+                               ExpiresAt = DateTime.UtcNow + VerificationLifetime() };
+  var code = IssueCode(account, CodeChannel.Email, CodePurpose.ProveAddress, address, check: check);
+  SendRendered(address, App.Setting<AccountsSetup>().Mails.Verification(account, address, AccountsLink($"/verify-email/{token}"), isChange, code),
+               "verify-" + TokenHash(token));
+}
+
+/// A fresh verification of the account's own address, unless a code for it is still live — a sign-in that must prove the
+/// address needs a code it can type, and a three-day link alone is not one.
+void EnsureVerification(User account) {
+  var now = DateTime.UtcNow;
+  if (OneTimeCode.Any(c => c.Account == account && c.Purpose == CodePurpose.ProveAddress && c.Destination == account.Email
+                           && c.UsedAt == null && c.ExpiresAt > now)) {
+    return;
+  }
+  SendCheck(account, account.Email, false);
+}
+
+/// An absolute link into the app, for a mail.
+public string AccountsLink(string path) {
+  return App.BaseUrl.TrimEnd('/') + path;
+}

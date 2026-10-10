@@ -1,0 +1,368 @@
+// Two-step sign-in: after the password, a code from an authenticator app — or, when the phone is lost, one of ten
+// one-time recovery codes. The password alone never signs in an account that has it on (SignIn answers a challenge,
+// not a ticket), and an app decides who MUST use it (`AccountsSetup.SecondFactor`).
+//
+// ⚑ EVERY CHANGE ASKS FOR THE PASSWORD AND A CURRENT CODE. These functions run as the sign-in flow, which does not know
+//   who is signed in (see SignIn.osy), so each one names the account and proves it. Turning the factor off, or asking
+//   for new recovery codes, takes a code as well as the password: a password alone must never be able to remove the
+//   factor that exists because a password alone is not enough.
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Mail;
+
+/// What `SignIn`, `SignUp` and `SignInWithProvider` answer. Exactly one of four: a `Ticket` (signed in — hand it to
+/// `Session.SignIn`), a `Challenge` (the first step was right and a code is next — `SignInWithCode(challenge, code)`),
+/// `MustEnrol` (the first step was right and this account must set up two-step sign-in first — `EnableSecondFactor` with
+/// the `Enrolment` token, which proves the first step so the person is not asked for it again; `Account` is the address
+/// to label the authenticator app with), or `NoAccount` (a provider verified who this is, there is no account for them
+/// here, and the app does not let visitors make one — an app with a door of its own, such as an application form, takes
+/// the provider sign-in page over and offers it). All empty: no account signs in with what was given — the same answer
+/// for every reason, so it says nothing about which.
+public class SignInStep {
+  public string Ticket = "";
+  public string Challenge = "";
+  /// What the challenge's code comes from: "app" (an authenticator — or a recovery code) or "sms" (texted to the proven
+  /// number `Account` shows masked).
+  public string ChallengeBy = "";
+  public bool MustEnrol = false;
+  public string Enrolment = "";
+  public string Account = "";
+  public bool NoAccount = false;
+  /// The address `Account` must be proven before a ticket: a mail is on its way — `VerifyEmailCode(Account, code)` takes
+  /// its six-digit code, or its link does the same. Answered alike for a new address and a taken one (the mail says which).
+  public bool MustVerify = false;
+  /// A code was texted, if the number may sign in here (`SignInWithPhone`) — answered alike whether or not it may.
+  public bool CodeSent = false;
+  /// The mail proved who holds the address `Account`, and this is the FIRST proof of it on an account that already has a
+  /// password — a password chosen before anybody had shown the address is theirs. So nothing is proven yet: ask again
+  /// (`VerifyEmail` / `VerifyEmailCode`) with that password, or with a NEW one, which starts the account over for whoever
+  /// holds the address (the old password, two-step sign-in, a phone and every linked provider are cleared).
+  public bool MustConfirmPassword = false;
+  /// A link proved the address `Account`, and there is nothing more to do here (an address change, or an account with no
+  /// password) — no ticket: the person signs in as usual.
+  public bool Proven = false;
+}
+
+/// What setting up two-step sign-in shows, once: the key to type into an authenticator app, and the QR code that
+/// carries it (rows of modules, '1' dark — `Qr.Encode`).
+public class SecondFactorSetup {
+  public string Key = "";
+  public List<string> Qr = [];
+}
+
+/// Two-step sign-in is on: a ticket (the password and a code were both given), and the recovery codes — shown once,
+/// never again, since only their fingerprints are kept.
+public class SecondFactorOn {
+  public string Ticket = "";
+  public List<string> RecoveryCodes = [];
+}
+
+/// What the account page shows about the signed-in account's two-step sign-in.
+public class SecondFactorFacts {
+  public bool On = false;
+  public bool Required = false;
+  public DateTime? OnSince = null;
+  public int RecoveryCodesLeft = 0;
+}
+
+/// The second half of a two-step sign-in: made when the password verified, spent when a code does. Only its hash is
+/// kept, it lapses in five minutes, and it dies after five wrong codes.
+///
+/// SECURITY-INVARIANT(accounts-no-ticket-before-the-second-factor): for an account with two-step sign-in on, `SignIn`
+/// answers a challenge and NO ticket; a ticket comes only from `SignInWithCode` with a live, unspent challenge and a
+/// code that fits — and `ResetPassword`, a mailed link, sets the password without signing in. Guarded by
+/// tests/second-factor.test.osy.
+public entity SignInChallenge {
+  [Required] User Account;
+  [Required, Unique, MaxLength(64)] string TokenHash;
+  [Required] DateTime ExpiresAt;
+  DateTime? UsedAt;
+  int Misses = 0;
+  /// Made for setting two-step sign-in up (`SignInStep.Enrolment`), not for a code: `SignInWithCode` refuses it, and
+  /// `EnableSecondFactor` accepts nothing else in place of the password.
+  bool ForEnrolment = false;
+  security { allow read, create, update when IsAuthenticator; }
+}
+
+/// One of an account's one-time recovery codes. Only a keyed fingerprint is kept (`Security.Fingerprint`), so the table
+/// — read by an operator, or from a backup — cannot be turned back into codes, nor guessed against offline.
+///
+/// SECURITY-INVARIANT(accounts-recovery-codes-fingerprinted-single-use): a recovery code is stored only as its keyed
+/// fingerprint, works once, and a new set spends the old one; its owner may see how many are left and nothing else.
+/// Guarded by tests/second-factor.test.osy.
+public entity RecoveryCode {
+  [Required] User Account;
+  [Required, MaxLength(64)] string CodeHash;
+  DateTime? UsedAt;
+  security {
+    allow read when IsAuthenticated || IsAuthenticator where Account == user;
+    allow read when IsAuthenticator;
+    allow create, update when IsAuthenticator;
+    deny read CodeHash when !IsAuthenticator;
+  }
+}
+
+/// A wrong code, kept for a quarter of an hour. Ten on one account in that time and no code is checked for it — a right
+/// one included — until they age out: six digits is a million guesses, and this makes them a year's work.
+///
+/// SECURITY-INVARIANT(accounts-code-attempts-are-rate-limited): a code is checked against an account only while it has
+/// fewer than ten misses in the last fifteen minutes, and a sign-in challenge dies at its fifth — so neither a new
+/// challenge per guess nor a guess per challenge escapes the limit. Guarded by tests/second-factor.test.osy.
+public entity SecondFactorMiss {
+  [Required] User Account;
+  [Required] DateTime At;
+  security { allow read, create when IsAuthenticator; }
+}
+
+// ── the flows ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// The second step: a challenge `SignIn` answered, and a code — the authenticator app's, or a recovery code; or, for an
+/// account that chose a texted code as its second step, the code texted to its phone. Answers a ticket, or "" for a code
+/// that does not fit; throws the sentence to show when the challenge is spent or the account has had too many wrong codes.
+[AuthMethod]
+public string SignInWithCode(string challenge, string code) {
+  var pending = SignInChallenge.FirstOrDefault(c => c.TokenHash == TokenHash(challenge));
+  var now = DateTime.UtcNow;
+  if (pending == null || pending.UsedAt != null || pending.ExpiresAt < now || !pending.Account.IsActive
+      || pending.ForEnrolment || (pending.Account.TotpSecret == null && !TextedSecondStep(pending.Account))) {
+    throw new ValidationException("That sign-in has expired — start again with your password.");
+  }
+  var account = pending.Account;
+  if (account.TotpSecret == null) { return SignInWithTextedCode(pending, code); }
+  RefuseWhenLockedOut(account);
+  if (!CodeFits(account, code)) {
+    pending.Misses = pending.Misses + 1;
+    if (pending.Misses >= ChallengeMissesAllowed()) { pending.UsedAt = now; }
+    RecordMiss(account);
+    return "";
+  }
+  pending.UsedAt = now;
+  return Admit(account);
+}
+
+/// The texted half of a sign-in: the code sent to the account's phone for this challenge.
+[SuppressWarning("cost-unbounded-read")]   // one challenge's live code — a resend spends the one before it
+string SignInWithTextedCode(SignInChallenge pending, string code) {
+  var account = pending.Account;
+  // SECURITY-INVARIANT(accounts-sms-is-not-a-required-second-factor) — the second check: a texted code never lets in an
+  // account the app requires a second factor of, even one whose challenge was made before the app came to require it.
+  if (App.Setting<AccountsSetup>().SecondFactor.Required(account)) {
+    pending.UsedAt = DateTime.UtcNow;
+    UnitOfWork.Commit();
+    throw new ValidationException($"{AccountsAppName()} asks for an authenticator app on your account — a texted code is not enough. Sign in again to set one up.");
+  }
+  // Only the challenge's live code — a resent one spent the code before it, which can no longer match.
+  var now = DateTime.UtcNow;
+  var match = CodeMatching(OneTimeCode.Where(c => c.Challenge == pending && c.Purpose == CodePurpose.SecondStep && c.UsedAt == null
+                                                  && c.ExpiresAt > now).ToList(), code);
+  if (match == null) {
+    pending.Misses = pending.Misses + 1;
+    if (pending.Misses >= ChallengeMissesAllowed()) { pending.UsedAt = DateTime.UtcNow; }
+    return "";
+  }
+  pending.UsedAt = DateTime.UtcNow;
+  return Admit(account);
+}
+
+/// A fresh key for an authenticator app, and its QR code — labelled with `email` so the phone's list says which account
+/// it is. Holds nothing and changes nothing: the key is kept only when `EnableSecondFactor` is handed it back with a code
+/// that proves the app took it.
+[AllowAnonymous]
+public SecondFactorSetup NewSecondFactorSetup(string email) {
+  var key = Totp.NewSecret();
+  return new SecondFactorSetup { Key = key, Qr = Qr.Encode(Totp.Uri(key, AccountsAppName(), NormalisedEmail(email))) };
+}
+
+/// Turn two-step sign-in on: the account's address and password — or, straight after a sign-in that answered
+/// `MustEnrol`, its `Enrolment` token in their place (a provider sign-in has no password to ask for again) — the key
+/// `NewSecondFactorSetup` gave, and the code the authenticator app now shows. Answers a ticket and the recovery codes,
+/// or throws the sentence to show.
+[AuthMethod]
+public SecondFactorOn EnableSecondFactor(string email, string password, string key, string code, string enrolment = "") {
+  var account = enrolment != "" ? Enrolling(enrolment) : Verified(email, password);
+  if (account.TotpSecret != null) {
+    throw new ValidationException("Two-step sign-in is already on. To move it to another phone, turn it off first — that asks for a code.");
+  }
+  RefuseWhenLockedOut(account);
+  long step = -1;
+  try { step = Totp.Verify(key, code, -1); }
+  catch (Exception) { throw new ValidationException("That key is not one this page made — start setting it up again."); }
+  if (step < 0) {
+    RecordMiss(account);
+    UnitOfWork.Commit();
+    throw new ValidationException("That code does not match — type the newest code your app shows, and check your phone's clock is set automatically.");
+  }
+  if (enrolment != "") { SpendEnrolment(enrolment); }
+  account.TotpSecret = Crypto.Encrypt(key);
+  account.TotpLastStep = step;
+  account.SecondFactorOnAt = DateTime.UtcNow;
+  var codes = IssueRecoveryCodes(account);
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.SecondFactorOn(account));
+  return new SecondFactorOn { Ticket = Admit(account), RecoveryCodes = codes };
+}
+
+/// Turn two-step sign-in off: the password AND a current code (or a recovery code). Answers "", or throws the sentence
+/// to show. An account that must use it is asked to set it up again at its next sign-in.
+[AuthMethod]
+[SuppressWarning("cost-unbounded-read")]   // one account's unspent recovery codes — ten at most
+public string DisableSecondFactor(string email, string password, string code) {
+  var account = Verified(email, password);
+  if (account.TotpSecret == null) { return ""; }
+  RequireCode(account, code);
+  var now = DateTime.UtcNow;
+  account.TotpSecret = null;
+  account.TotpLastStep = -1;
+  account.SecondFactorOnAt = null;
+  foreach (var spare in RecoveryCode.Where(r => r.Account == account && r.UsedAt == null).ToList()) { spare.UsedAt = now; }
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.SecondFactorOff(account));
+  return "";
+}
+
+/// A new set of ten recovery codes, given the password and a current code; the old set stops working. Throws the
+/// sentence to show.
+[AuthMethod]
+public List<string> NewRecoveryCodes(string email, string password, string code) {
+  var account = Verified(email, password);
+  if (account.TotpSecret == null) { throw new ValidationException("Turn two-step sign-in on first."); }
+  RequireCode(account, code);
+  return IssueRecoveryCodes(account);
+}
+
+/// The signed-in account's two-step sign-in, for its account page. Runs as the account itself: it reads only its own row
+/// and its own recovery codes' count.
+public SecondFactorFacts MySecondFactor() {
+  var me = Me();
+  if (me == null) { return new SecondFactorFacts(); }
+  return new SecondFactorFacts {
+    On = me.SecondFactorOnAt != null, Required = App.Setting<AccountsSetup>().SecondFactor.Required(me),
+    OnSince = me.SecondFactorOnAt, RecoveryCodesLeft = RecoveryCode.Count(r => r.Account == me && r.UsedAt == null),
+  };
+}
+
+/// Clear `account`'s second step — the authenticator, its recovery codes, a texted step, every outstanding challenge and
+/// enrolment — and tell the account by mail. It then signs in with its password alone until it sets a factor up again;
+/// an account the app requires one of is taken through setting it up at its next sign-in.
+///
+/// ⚑ AN ADMINISTRATOR'S RESET, NOT A DOOR. The fields it clears are the sign-in flow's alone (this kit's floor on `User`),
+///   so nothing running as a person can call this to effect: it runs where those fields may be written — the sign-in
+///   flow, or a run that writes as the system — and Osysharp.UserManagement reaches it only through an audited access change
+///   that the app's people managers alone may make (SECURITY-INVARIANT(people-access-changes-are-recorded-and-the-managers-alone)).
+[SuppressWarning("cost-unbounded-read")]   // one account's unspent recovery codes and open sign-in challenges
+public void ClearSecondFactor(User account) {
+  var now = DateTime.UtcNow;
+  account.TotpSecret = null;
+  account.TotpLastStep = -1;
+  account.SecondFactorOnAt = null;
+  account.SmsSecondStep = false;
+  foreach (var spare in RecoveryCode.Where(r => r.Account == account && r.UsedAt == null).ToList()) { spare.UsedAt = now; }
+  foreach (var challenge in SignInChallenge.Where(c => c.Account == account && c.UsedAt == null).ToList()) { challenge.UsedAt = now; }
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.SecondFactorReset(account));
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// How long the second step of a sign-in may take.
+public TimeSpan ChallengeLifetime() { return TimeSpan.FromMinutes(5); }
+
+/// How long setting two-step sign-in up at sign-in may take — scanning a code and finding the app takes longer.
+public TimeSpan EnrolmentLifetime() { return TimeSpan.FromMinutes(15); }
+
+/// A token proving the first step of a sign-in just passed, for setting two-step sign-in up (`SignInStep.Enrolment`).
+string NewEnrolment(User account) {
+  var token = Security.RandomId(32);
+  new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + EnrolmentLifetime(),
+                        ForEnrolment = true };
+  return token;
+}
+
+/// The account a live, unspent enrolment token was made for — else throws the sentence to show.
+User Enrolling(string enrolment) {
+  var pending = SignInChallenge.FirstOrDefault(c => c.TokenHash == TokenHash(enrolment));
+  if (pending == null || !pending.ForEnrolment || pending.UsedAt != null || pending.ExpiresAt < DateTime.UtcNow
+      || !pending.Account.IsActive) {
+    throw new ValidationException("That sign-in has expired — start again from the sign-in page.");
+  }
+  return pending.Account;
+}
+
+void SpendEnrolment(string enrolment) {
+  var pending = SignInChallenge.FirstOrDefault(c => c.TokenHash == TokenHash(enrolment));
+  if (pending != null) { pending.UsedAt = DateTime.UtcNow; }
+}
+
+/// Wrong codes a challenge survives; the next sign-in starts again from the password.
+int ChallengeMissesAllowed() { return 5; }
+
+/// Wrong codes an account may have in `MissWindow` before no code is checked for it.
+int MissesAllowed() { return 10; }
+TimeSpan MissWindow() { return TimeSpan.FromMinutes(15); }
+
+/// A recovery code as it is compared: no spaces, no dashes, lower-case.
+string CleanCode(string code) { return code.Replace(" ", "").Replace("-", "").Trim().ToLower(); }
+
+/// What is kept in place of a recovery code — keyed by the app's own key, so a stolen table is not a list of codes.
+string RecoveryFingerprint(string code) { return Security.Fingerprint("recovery-code:" + CleanCode(code)); }
+
+/// Signed in: the ticket, when, and the app told (`AccountsSetup.Events`). Every ticket the kit issues for a sign-in
+/// comes from here, so an app's sign-in history misses no way in.
+string Admit(User account) {
+  var at = DateTime.UtcNow;
+  account.LastLoginAt = at;
+  App.Setting<AccountsSetup>().Events.SignedIn(account, at);
+  return Security.IssueJwt(account.Id, account.Email);
+}
+
+/// Does `code` prove the second factor — the authenticator's code for a step after the last one used, or an unspent
+/// recovery code? Spends what it matched (and tells the owner by mail when it was a recovery code).
+bool CodeFits(User account, string code) {
+  var stored = account.TotpSecret;
+  if (stored == null) { return false; }
+  var step = Totp.Verify(Crypto.Decrypt(stored), code, account.TotpLastStep);
+  if (step >= 0) {
+    account.TotpLastStep = step;
+    return true;
+  }
+  var hash = RecoveryFingerprint(code);
+  var spare = RecoveryCode.FirstOrDefault(r => r.Account == account && r.CodeHash == hash && r.UsedAt == null);
+  if (spare == null) { return false; }
+  var left = RecoveryCode.Count(r => r.Account == account && r.UsedAt == null) - 1;
+  spare.UsedAt = DateTime.UtcNow;
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.RecoveryCodeUsed(account, left));
+  return true;
+}
+
+/// A change that needs a current code: refuse when locked out, and record and refuse a code that does not fit.
+void RequireCode(User account, string code) {
+  RefuseWhenLockedOut(account);
+  if (!CodeFits(account, code)) {
+    RecordMiss(account);
+    UnitOfWork.Commit();
+    throw new ValidationException("That code is not right — type the newest code your app shows, or a recovery code.");
+  }
+}
+
+/// Throws when the account has had too many wrong codes lately.
+void RefuseWhenLockedOut(User account) {
+  var since = DateTime.UtcNow - MissWindow();
+  if (SecondFactorMiss.Count(m => m.Account == account && m.At > since) >= MissesAllowed()) {
+    throw new ValidationException("Too many wrong codes — wait fifteen minutes, then try again.");
+  }
+}
+
+void RecordMiss(User account) { new SecondFactorMiss { Account = account, At = DateTime.UtcNow }; }
+
+/// Ten fresh recovery codes for the account, `xxxxx-xxxxx`; every unspent code it had stops working.
+[SuppressWarning("cost-unbounded-read")]   // one account's unspent recovery codes — ten at most
+List<string> IssueRecoveryCodes(User account) {
+  var now = DateTime.UtcNow;
+  foreach (var old in RecoveryCode.Where(r => r.Account == account && r.UsedAt == null).ToList()) { old.UsedAt = now; }
+  var codes = new List<string>();
+  for (var i = 0; i < 10; i++) {
+    var raw = Security.RandomHex(10);
+    new RecoveryCode { Account = account, CodeHash = RecoveryFingerprint(raw) };
+    codes.Add(raw.Substring(0, 5) + "-" + raw.Substring(5, 5));
+  }
+  return codes;
+}

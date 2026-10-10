@@ -1,0 +1,47 @@
+// A new account's roles, told to the app. Sign-up gives a new account the roles the app chose for it (`SignupRole`,
+// `FirstAccountRole` — SignIn.osy's `GrantNewAccountRoles`), and the app hears of each through
+// `RolesSetup.Events.Granted`, exactly as it hears of a role the user manager (Osysharp.UserManagement) or an accepted invitation
+// (Osysharp.Invitations) gives — so a desk that puts a new agent on its queues does not depend on how the agent arrived.
+//
+// ⚑ TOLD BY A RUN, AS THE SYSTEM — the way People and Invitations tell it. Sign-up runs as the sign-in flow's own role
+//   (`AuthBootstrap`), which may make an account and its grants and nothing else of the app's; what an app does about a
+//   role (a queue membership, a welcome task) is the app's business and must not need the sign-in flow to be granted it.
+//   The run's first step is part of the sign-up's commit, so the telling lands with the account or not at all.
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Workflow;
+
+public enum RoleToldState { Telling, Told }
+
+/// One role a sign-up gave a new account, waiting to be told to the app. Made by the sign-in flow alone, in the
+/// commit that makes the account; told by its run; never edited.
+public entity RoleGivenAtSignup {
+  [Required] Principal Member;
+  [Required] role Role;
+  RoleToldState State;
+
+  security {
+    allow create when IsAuthenticator;
+    // The sign-in flow's own role is never "given" to anybody — the same rule People's access changes keep.
+    deny create where Role == role.Authenticator;
+  }
+}
+
+workflow TellRoleGivenAtSignup {
+  Tracks    = RoleGivenAtSignup.State;
+  Autostart = true;
+  Initial   = Telling;
+
+  state Telling {
+    enter {
+      var given = this.Item;
+      // Told only for a grant that is really there — the row says what sign-up gave, the grant is what holds.
+      if (RoleGrant.Any(g => g.Member == given.Member && g.Role == given.Role)) {
+        App.Setting<RolesSetup>().Events.Granted(given.Member, given.Role);
+      }
+      goto Told;
+    }
+  }
+  terminal success Told { }
+}

@@ -1,0 +1,152 @@
+// An account for somebody who never signs in themselves — a child a parent books for, a walk-in the desk records, a
+// member a coach keeps a register of — made by somebody the app names, with no address and no way in, until it is given
+// one.
+//
+// ⚑ IT IS A REAL ACCOUNT. Bookings, passes, signatures and every other row an app keeps about a person point at an
+//   account; a "person without an account" would be a second kind of person every kit had to know about. So the managed
+//   person IS a `User` (or the app's own kind, `AccountKinds.New`) — it simply has no address anybody reads and no
+//   password, and the sign-in flow refuses it like any account without one.
+// ⚑ NOBODY IMPROVISES ONE. Before this, an app made one by signing up `walkin-<guid>@no-login.invalid` with a random
+//   password (build run 8): an account with a password nobody holds, made by a sign-up the app had to open, with nothing
+//   saying who made it or for whom. Here the account is made by `MakeManagedAccount`, behind the app's own policy, with
+//   the record of who made it — and the person who made it (a guardian) is the one who may give it a login later.
+// ⚑ GIVING IT A LOGIN IS A PROVEN ADDRESS, NOTHING LESS. `GiveManagedAccountAnAddress` mails a link to the address; the
+//   account moves there only when it is opened (`ConfirmAddressChange`, the one place an address moves), and the person
+//   then chooses a password through "forgot password" — exactly as anyone else's account works.
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Mail;
+using Osysharp.Workflow;
+
+/// Who may make an account for somebody who will not sign in themselves. Nobody, until the app says who —
+/// `policy MakesManagedAccounts => IsDesk;` for a desk, or `=> IsAuthenticated;` when any member may add a child.
+virtual policy MakesManagedAccounts => false;
+
+/// Where a managed account's making stands — tracked by `ManagedAccountMaking`. ⚠ Appended, never inserted.
+public enum ManagedAccountState {
+  [Label("Making the account")] Making,
+  [Label("Made")] Made,
+}
+
+/// The record of a managed account: the name it was made with, who made it and when, who looks after it, and the
+/// account itself — written by the run that makes it.
+///
+/// SECURITY-INVARIANT(accounts-a-managed-account-is-made-by-its-function-and-recorded): a managed account is made only
+/// by `MakeManagedAccount` — behind `[Authorize(MakesManagedAccounts)]`, which no caller satisfies until the app answers
+/// it — and only as an account with no password and an address on a domain that cannot receive mail, so it cannot be
+/// signed into. Who made it is recorded, and only its guardian (or, for one made with none, whoever may make them) can
+/// give it an address — which moves it only once that address confirms. Guarded by tests/managed.test.osy.
+public entity ManagedAccountRequest {
+  /// The name the account was made with — "Sam (age 9)".
+  [Required, MaxLength(200)] string Name;
+  /// Who looks after the account — the person who made it, unless it was made for nobody in particular (a walk-in).
+  Principal? Guardian;
+  /// The account — written by the run, in the commit that made the request.
+  User? Account;
+  /// Who made it, and when — written by the platform on commit, whatever the caller sent.
+  [CreatedBy] Guid? MadeBy;
+  [CreatedAt] DateTime MadeAt;
+  ManagedAccountState State;                          // no default — ManagedAccountMaking owns it
+  security {
+    allow read when IsAuthenticator || MakesManagedAccounts;
+    allow create when MakesManagedAccounts;
+    deny create except via MakeManagedAccount;
+  }
+}
+
+/// The address a managed account is given: unique (the column is), and on a domain that cannot receive mail (RFC 2606),
+/// so no message is ever sent to it and nobody can sign in with it.
+public string ManagedAddress() { return $"managed-{Guid.NewGuid().ToString("N")}@managed.invalid"; }
+
+/// Is `account` one that was made for somebody and has not been given an address of its own yet?
+public bool IsManaged(User account) { return account.Email.EndsWith("@managed.invalid"); }
+
+/// Make an account for `name`, who will not sign in themselves — a child, a walk-in. `lookAfterIt` (the default) makes
+/// the caller its guardian: the person who may give it an address later. Answers the record; its `Account` is the
+/// account, made in the same commit. Throws the sentence to show for a name that is empty or too long.
+[Server, Authorize(MakesManagedAccounts)]
+public ManagedAccountRequest MakeManagedAccount(string name, bool lookAfterIt = true) {
+  var trimmed = name.Trim();
+  if (trimmed == "") { throw new ValidationException("Give the account a name — the person's name as you know it."); }
+  if (trimmed.Length > 200) { throw new ValidationException("Give a name of at most 200 characters."); }
+  return new ManagedAccountRequest { Name = trimmed, Guardian = lookAfterIt ? CurrentPrincipal() : null };
+}
+
+/// Give the managed `account` an address of its own: a link goes to `address`, and the account moves there only when
+/// it is opened — then its person signs in by choosing a password ("forgot password"). Only the account's guardian may,
+/// or — for an account made with none — whoever may make managed accounts. Throws the sentence to show.
+[Server, Authorize(MakesManagedAccounts)]
+public void GiveManagedAccountAnAddress(User account, string address) {
+  var record = ManagedAccountRequest.FirstOrDefault(r => r.Account == account);
+  if (record == null || !IsManaged(account)) { throw new ValidationException("That account already has an address of its own."); }
+  var me = CurrentPrincipal();
+  if (record.Guardian != null && (me == null || record.Guardian.Id != me.Id)) {
+    throw new ValidationException("Only the person who looks after this account can give it an address.");
+  }
+  var normalised = NormalisedEmail(address);
+  if (!LooksLikeEmail(normalised)) { throw new ValidationException("That does not look like an email address."); }
+  if (Principal.Any(p => p.Email == normalised)) { throw new ValidationException("Another account already uses that address."); }
+  new ManagedAccountAddress { Account = account, Address = normalised };
+}
+
+/// An address given to a managed account, waiting for its person to open the link — the record of who gave it, and when.
+/// Its run sends the link; the account moves only when it is opened.
+public entity ManagedAccountAddress {
+  [Required] User Account;
+  [Required, MaxLength(255)] string Address;
+  [CreatedBy] Guid? GivenBy;
+  [CreatedAt] DateTime GivenAt;
+  ManagedAccountState State;                          // no default — ManagedAccountLinking owns it
+  security {
+    allow read when IsAuthenticator || MakesManagedAccounts;
+    allow create when MakesManagedAccounts;
+    deny create except via GiveManagedAccountAnAddress;
+  }
+}
+
+/// Sends the link that gives a managed account its address — as the system, in the commit that gave it.
+public workflow ManagedAccountLinking {
+  Tracks    = ManagedAccountAddress.State;
+  Autostart = true;
+  Initial   = Making;
+
+  state Making {
+    enter {
+      SendCheck(this.Item.Account, this.Item.Address, true);
+      goto Made;
+    }
+  }
+
+  terminal success Made { }
+}
+
+/// The managed accounts `guardian` looks after — what a "my family" page lists.
+public List<User> ManagedAccountsOf(Principal guardian) {
+  return ManagedAccountRequest.Where(r => r.Guardian == guardian && r.Account != null)
+    .OrderBy(r => r.Name).Take(100).Select(r => r.Account!).ToList();
+}
+
+/// Makes the account — as the system, in the commit that made the request: the app's kind of account
+/// (`AccountKinds.New`), with an address that cannot receive mail and no password.
+public workflow ManagedAccountMaking {
+  Tracks    = ManagedAccountRequest.State;
+  Autostart = true;
+  Initial   = Making;
+
+  state Making {
+    enter {
+      var address = ManagedAddress();
+      var account = App.Setting<AccountsSetup>().Kinds.New(address, this.Item.Name);
+      if (account.Email != address) {
+        throw new ValidationException("The app's AccountKinds.New made an account for another address — it must use the one it was given.");
+      }
+      account.DisplayName = this.Item.Name;
+      this.Item.Account = account;
+      goto Made;
+    }
+  }
+
+  terminal success Made { }
+}

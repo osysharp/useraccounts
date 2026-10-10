@@ -1,0 +1,110 @@
+// An account for somebody who never signs in themselves — made by a member the app names, recorded, unable to sign in,
+// and given an address only by the person who looks after it, moving there only once that address confirms.
+// SECURITY-INVARIANT(accounts-a-managed-account-is-made-by-its-function-and-recorded).
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void Household() {
+  var mo = new User { Email = "mo@desk.test", DisplayName = "Mo", PasswordHash = Security.HashPassword("correct-horse-2"),
+                      EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = mo, Role = AppRole.Member };
+  var lu = new User { Email = "lu@desk.test", DisplayName = "Lu", PasswordHash = Security.HashPassword("correct-horse-3"),
+                      EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = lu, Role = AppRole.Member };
+  // Signed in, and no role the app names — not somebody who may make accounts.
+  new User { Email = "vi@desk.test", DisplayName = "Vi", PasswordHash = Security.HashPassword("correct-horse-4"),
+             EmailVerifiedAt = DateTime.UtcNow };
+}
+
+principal Mo => User.Single(u => u.Email == "mo@desk.test");
+principal Lu => User.Single(u => u.Email == "lu@desk.test");
+principal Vi => User.Single(u => u.Email == "vi@desk.test");
+
+/// What a direct write of a managed account's record would be — refused, whoever tries it.
+void RecordDirectly(string name) { new ManagedAccountRequest { Name = name }; }
+
+[Test(Household)]
+void a_member_makes_an_account_for_a_child_that_cannot_sign_in() {
+  runas (Mo) { MakeManagedAccount("  Sam  "); }
+  runas (AuthBootstrap) {
+    var record = ManagedAccountRequest.Single(r => r.Name == "Sam");
+    Assert.Equal(ManagedAccountState.Made, record.State);
+    Assert.Equal(User.Single(u => u.Email == "mo@desk.test").Id, record.MadeBy);
+    Assert.Equal("mo@desk.test", record.Guardian!.Email);
+    var sam = record.Account!;
+    // The app's own kind of account, named as given, with no password and an address that cannot receive mail.
+    Assert.True(sam is Employee);
+    Assert.Equal("Sam", sam.DisplayName);
+    Assert.Null(sam.PasswordHash);
+    Assert.True(sam.Email.EndsWith("@managed.invalid"));
+    Assert.True(IsManaged(sam));
+    // Nobody can sign in with it, and asking for a reset sends nothing.
+    Assert.Equal("", SignIn(sam.Email, "anything-at-all").Ticket ?? "");
+    RequestPasswordReset(sam.Email);
+    Assert.Equal(0, MailsTo(sam.Email, ""));
+    // …and the guardian's list names it.
+    Assert.Equal(1, ManagedAccountsOf(User.Single(u => u.Email == "mo@desk.test")).Count);
+  }
+}
+
+[Test(Household)]
+void nobody_the_app_did_not_name_may_make_one_and_the_record_is_never_written_directly() {
+  runas (Vi) { Assert.Throws<NotAuthorized>(() => MakeManagedAccount("Kit")); }
+  runas (Mo) { Assert.Denied(() => RecordDirectly("Kit")); }
+  runas (AuthBootstrap) {
+    Assert.Equal(0, ManagedAccountRequest.Count());
+    Assert.False(User.Any(u => u.DisplayName == "Kit"));
+  }
+}
+
+[Test(Household)]
+void a_name_is_needed() {
+  runas (Mo) { Assert.Contains("Give the account a name", Assert.Throws(() => MakeManagedAccount("   ")).Message); }
+}
+
+[Test(Household)]
+void the_guardian_gives_it_an_address_and_it_moves_only_when_that_address_confirms() {
+  runas (Mo) { MakeManagedAccount("Sam"); }
+  User? sam = null;
+  runas (AuthBootstrap) { sam = ManagedAccountRequest.Single(r => r.Name == "Sam").Account!; }
+  // Somebody else's child is not theirs to give an address to.
+  runas (Lu) {
+    Assert.Contains("Only the person who looks after", Assert.Throws(() => GiveManagedAccountAnAddress(sam!, "sam@desk.test")).Message);
+  }
+  runas (Mo) { GiveManagedAccountAnAddress(sam!, "Sam@Desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) {
+    // Not moved yet — a link went to the new address.
+    Assert.True(IsManaged(User.Single(u => u.DisplayName == "Sam")));
+    token = TokenIn("sam@desk.test", "/verify-email/");
+    Assert.NotEqual("", token);
+    Assert.Equal(ManagedAccountState.Made, ManagedAccountAddress.Single().State);
+  }
+  runas (AuthBootstrap) { VerifyEmail(token); }
+  runas (AuthBootstrap) {
+    var moved = User.Single(u => u.DisplayName == "Sam");
+    Assert.Equal("sam@desk.test", moved.Email);
+    Assert.False(IsManaged(moved));
+  }
+  // Sam chooses a password the way anybody does, and signs in.
+  runas (AuthBootstrap) { RequestPasswordReset("sam@desk.test"); }
+  string reset = "";
+  runas (AuthBootstrap) { reset = TokenIn("sam@desk.test", "/reset-password/"); }
+  runas (AuthBootstrap) { ResetPassword(reset, "sams-own-pass-1"); }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("sam@desk.test", "sams-own-pass-1").Ticket ?? ""); }
+}
+
+[Test(Household)]
+void erasing_the_person_erases_the_name_their_record_kept() {
+  runas (Mo) { MakeManagedAccount("Sam"); }
+  User? sam = null;
+  runas (AuthBootstrap) { sam = ManagedAccountRequest.Single(r => r.Name == "Sam").Account!; }
+  // The app's erasure run (tests/model/erasure.osy) — the kit's `EraseAccount`, as the system.
+  runas (Mo) { new AccountErasure { Account = sam! }; }
+  runas (AuthBootstrap) {
+    Assert.False(ManagedAccountRequest.Any(r => r.Name == "Sam"));
+    Assert.Equal("(erased)", ManagedAccountRequest.Single().Name);
+  }
+}

@@ -1,0 +1,82 @@
+// The pages — each form in a plain centred frame — served at the kit's routes in every app that uses the kit:
+//
+//     /login                   SignInPage          /reset-password/{token}   ResetPasswordPage
+//     /sign-up                 SignUpPage          /verify-email/{token}     VerifyEmailPage
+//     /forgot-password         ForgotPasswordPage  /account                  AccountPage (signed in)
+//     /oauth/sign-in           ProviderSignInPage  (where the platform brings a provider sign-in back to)
+//
+// ⚑ THE ROUTES ARE THE KIT'S: its mail links to `/reset-password/{token}` and `/verify-email/{token}`, its forms link to
+//   `/login`, `/sign-up`, `/forgot-password` and `/account`, and `/login` is where the platform sends a visitor who is not
+//   signed in. Every colour, face and size is a theme token, so the app's theme dresses them.
+//
+// ⚑ AN APP TAKES ONE OVER by declaring a component of the same name — the rule an app's own `Card` already follows over
+//   the kit's. With a `[Route]` of its own it is served there instead (its own frame, its own route); without one, the
+//   address is not served. The screens (`SignInScreen`, …) and the bare forms (Forms.osy) are what an app's own page
+//   renders:
+//
+//     [Route("/login")] [AllowAnonymous] [Render(CSR)]
+//     component SignInPage() { render { MyFrame { SignInForm(); } } }
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Ui;
+
+[Composable]
+public component SignInScreen() {
+  render { AccountsFrame("Sign in") { SignInForm(); } }
+}
+
+[Composable]
+public component SignUpScreen() {
+  render { AccountsFrame("Create an account") { SignUpForm(); } }
+}
+
+[Composable]
+public component ForgotPasswordScreen() {
+  render { AccountsFrame("Forgot your password?", sub: "We will mail you a link to choose a new one.") { ForgotPasswordForm(); } }
+}
+
+[Composable]
+public component ResetPasswordScreen(string token) {
+  render { AccountsFrame("Choose a new password") { ResetPasswordForm(token); } }
+}
+
+[Composable]
+public component VerifyEmailScreen(string token) {
+  render { AccountsFrame("Confirm your address") { VerifyEmailResult(token); } }
+}
+
+[Composable]
+public component ProviderSignInScreen() {
+  render { AccountsFrame("Signing in") { ProviderSignIn(); } }
+}
+
+[Composable]
+public component AccountScreen() {
+  render { AccountsFrame("Your account", sub: "How you sign in.") { AccountSettings(); } }
+}
+
+// ── the pages ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// Authorized exactly as the same page in app source would be: the five a signed-out visitor needs say
+// `[AllowAnonymous]`; the account page says nothing, so it requires a signed-in person.
+
+[Route("/login")] [Title("Sign in")] [AllowAnonymous] [Render(CSR)]
+public component SignInPage() { render { SignInScreen(); } }
+
+[Route("/sign-up")] [Title("Create an account")] [AllowAnonymous] [Render(CSR)]
+public component SignUpPage() { render { SignUpScreen(); } }
+
+[Route("/forgot-password")] [Title("Forgot your password")] [AllowAnonymous] [Render(CSR)]
+public component ForgotPasswordPage() { render { ForgotPasswordScreen(); } }
+
+[Route("/reset-password/{token}")] [Title("Choose a new password")] [AllowAnonymous] [Render(CSR)]
+public component ResetPasswordPage(string token) { render { ResetPasswordScreen(token); } }
+
+[Route("/verify-email/{token}")] [Title("Confirm your address")] [AllowAnonymous] [Render(CSR)]
+public component VerifyEmailPage(string token) { render { VerifyEmailScreen(token); } }
+
+[Route("/oauth/sign-in")] [Title("Signing in")] [AllowAnonymous] [Render(CSR)]
+public component ProviderSignInPage() { render { ProviderSignInScreen(); } }
+
+[Route("/account")] [Title("Your account")] [Render(CSR)]
+public component AccountPage() { render { AccountScreen(); } }

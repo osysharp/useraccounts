@@ -1,0 +1,150 @@
+// Everything this app writes about signing in: its roles, the one setting, and its own kind of account.
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+using Osysharp.Sms;
+
+[Role] enum AppRole { Authenticator, Member, Admin }
+
+app.Accounts = new AccountsSetup {
+  AppName = "Kit Test Desk", SignupRole = AppRole.Member, FirstAccountRole = AppRole.Admin,
+  // The setup is configuration and reads no data: a test closes sign-up by stubbing `SignupIsOpen`.
+  SignupOpen = SignupIsOpen(),
+  // A new account is one of this app's own kind — an Employee, in the department everyone starts in.
+  Kinds = new DeskKinds(),
+  // Admins must use two-step sign-in; everybody else may.
+  SecondFactor = new AdminsUseCodes(),
+  // The desk's mark on every sign-in screen — a file it keeps, named once a test writes it (`the_apps_logo_…`).
+  LogoUrl = DeskLogoUrl(),
+  // A test turns it on to see a sign-up that must prove its address first.
+  RequireVerifiedEmail = AddressProofRequired(),
+  // …and contractors always prove theirs, whatever that switch says.
+  AddressProof = new ContractorsProveTheirAddress(),
+  // Everything a phone number can do, so the tests reach every texted flow.
+  ProvePhones = true, SmsSignIn = true, SmsSecondStep = true,
+};
+
+// Every role the app is told was given — what a test reads to see a sign-up tell it (the kit's RolesTold.osy).
+app.Roles = new RolesSetup { Events = new RecordingRoles() };
+
+public class RecordingRoles : RoleEvents {
+  public override void Granted(Principal person, role r) { new RoleTold { Member = person, Role = r }; }
+}
+
+/// A role the app was told somebody was given. Nobody may create one: only a run, as the system, can.
+entity RoleTold {
+  [Required] Principal Member;
+  [Required] AppRole Role;
+  security { allow read when IsAuthenticated; }
+}
+
+// The desk's text messages go through a sender that RECORDS instead of sending — no test ever texts a real phone.
+app.Sms = new SmsSetup { Sender = new RecordingSms(), From = "KitDesk" };
+
+/// A sender that records instead of sending.
+public class RecordingSms : ISmsSender {
+  public string Key { get; } = "recording";
+  public bool IsReady() { return true; }
+  public string SendSms(SmsMessage message, string idempotencyKey) {
+    new Texted { To = message.To, Text = message.Text };
+    return "texted-" + message.To;
+  }
+}
+
+/// What the recording sender was handed — one row per text.
+entity Texted {
+  [Required, MaxLength(20)] string To;
+  [Required, MaxLength(1600)] string Text;
+  security { allow read, create when IsAnonymous || IsAuthenticated || IsAuthenticator; }
+}
+
+// The switches a test flips — each a function the test stubs (`SignupIsOpen.Stub(() => false)`), so the setup above is
+// configuration, worked out once and kept, and still answers each test what it set.
+
+/// Whether anyone may sign up — yes, until a test closes it.
+bool SignupIsOpen() { return true; }
+
+/// The desk's logo — none, until a test that has written one names it.
+string DeskLogoUrl() { return ""; }
+
+/// Whether a sign-up proves its address before it is in — no, until a test turns it on.
+bool AddressProofRequired() { return false; }
+
+// The providers the desk signs people in with — what its sign-in page offers as "Continue with …". The secrets' values
+// are never set here: a test reaches the provider sign-in through `TestOAuth.PendingToken`, the seal the callback makes.
+app.Secrets = [ new Secret("GoogleSecret"), new Secret("GitHubSecret") ];
+app.OAuthClients = [
+  new OAuthClient("Google") {
+    Provider = OAuthProvider.Google, Capabilities = [OAuthCapability.Login],
+    ClientId = "desk-google.apps.example", ClientSecret = Secret.GoogleSecret, Scopes = ["openid", "email", "profile"],
+  },
+  new OAuthClient("GitHub") {
+    Provider = OAuthProvider.Github, Capabilities = [OAuthCapability.Login],
+    ClientId = "desk-github", ClientSecret = Secret.GitHubSecret, Scopes = ["read:user", "user:email"],
+  },
+];
+
+/// An account on the contractors' domain proves its address before it is signed in; everybody else signs in at once.
+public class ContractorsProveTheirAddress : AddressProofPolicy {
+  public override bool Required(User account) { return account.Email.EndsWith("@contractor.test"); }
+}
+
+public class AdminsUseCodes : SecondFactorPolicy {
+  public override bool Required(User account) { return RoleGrant.Any(g => g.Member == account && g.Role == AppRole.Admin); }
+}
+
+public class DeskKinds : AccountKinds {
+  public override User New(string email, string name) { return new Employee { Email = email, Department = "New starters" }; }
+}
+
+policy IsMember => RoleGrant.Any(g => g.Member == user && g.Role == AppRole.Member);
+
+// The desk's admins may start an address change for somebody whose old address is gone (tests/assisted-change.test.osy).
+policy ChangesAccountsFor => RoleGrant.Any(g => g.Member == user && g.Role == AppRole.Admin);
+
+// Any member may make an account for somebody who will not sign in themselves — a family member they book for
+// (tests/managed.test.osy).
+policy MakesManagedAccounts => IsMember;
+
+/// A colleague with a department — an app's own kind of account, signing in through the kit.
+entity Employee : User {
+  [MaxLength(80)] string Department = "";
+  security {
+    allow read when IsAuthenticated || IsAuthenticator;
+    allow create when IsAuthenticator;
+    allow update when IsAuthenticated || IsAuthenticator where Id == user.Id;
+    allow update when IsAuthenticator;
+  }
+}
+
+/// A page only members see — what a sign-up's role is for.
+[Route("/")]
+[Title("Home")]
+[Render(CSR)]
+component HomePage() {
+  var me = Session.CurrentUser;
+  render {
+    Stack(gap: 2, p: 4) {
+      Text("Welcome to the desk");
+      if (me != null) { Text($"Signed in as {me.Email}"); }
+    }
+  }
+}
+
+/// Read one's own hash — which nobody but the sign-in flow may.
+string? MyHash() {
+  var me = Me();
+  return me == null ? null : me.PasswordHash;
+}
+
+/// Is the signed-in account an Employee?
+bool AmEmployee() { return Session.CurrentUser is Employee; }
+
+/// Read one's own two-step secret — which nobody but the sign-in flow may, the account itself included.
+string? MyTotpSecret() {
+  var me = Me();
+  return me == null ? null : me.TotpSecret;
+}
+
+/// Write an account's two-step secret directly, as whoever calls it — what the security tests expect to be refused.
+void SetTotpSecret(string email, string? value) { User.Single(u => u.Email == email).TotpSecret = value; }
+

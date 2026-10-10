@@ -1,0 +1,270 @@
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Mail;
+using Osysharp.Sms;
+
+/// An account that signs in with an address and a password — the default kind of `Principal`. An app that needs more
+/// about its people derives from it (`entity Employee : User { Department Department; }`) and every one of them signs in
+/// here, with every rule below still holding.
+public entity User : Principal {
+  /// The password's hash — never the password. Null for an account that signs in some other way (an identity provider).
+  [MaxLength(200)] string? PasswordHash;
+  /// When the password was last set.
+  DateTime? PasswordChangedAt;
+  /// The authenticator app's secret for two-step sign-in, sealed with the app's own key (`Crypto.Encrypt`) — null while
+  /// two-step sign-in is off. Only the sign-in flow reads it, and only to check a code.
+  [MaxLength(400)] string? TotpSecret;
+  /// The step (`Totp.Verify`) of the last code accepted: a code for it or any earlier step is refused, so each code
+  /// works once. -1 before the first.
+  long TotpLastStep = -1;
+  /// When two-step sign-in was turned on — null while it is off. The account's owner reads it (the account page).
+  DateTime? SecondFactorOnAt;
+  /// The account's phone number, E.164 — set by the sign-in flow alone, once a texted code proved it (`ProvePhone`).
+  [MaxLength(20)] string? Phone;
+  /// When the number was proven — null for none.
+  DateTime? PhoneVerifiedAt;
+  /// The account chose a texted code as its second step (`SetSmsSecondStep`) — never the factor an app can require.
+  bool SmsSecondStep = false;
+
+  // ⚠ This block is the floor every type derived from `User` stands on — one rule per kind of caller, derived exactly.
+  security {
+    allow read when IsAuthenticated || IsAuthenticator;
+    allow create when IsAuthenticator;
+    allow update when IsAuthenticated || IsAuthenticator where Id == user.Id;
+    allow update when IsAuthenticator;
+    // SECURITY-INVARIANT(accounts-hash-is-the-sign-in-flows-alone): nobody but the sign-in flow reads the hash or
+    // writes it — not the account itself, not an app's staff, not an app's subtype of `User` (the package floor
+    // carries both denies to every subtype). The `when` is not optional: an unconditional deny drops the column from
+    // the sign-in's own read and nobody could sign in. Guarded by tests/security.test.osy.
+    deny read PasswordHash when !IsAuthenticator;
+    deny update PasswordHash when !IsAuthenticator;
+    deny update PasswordChangedAt when !IsAuthenticator;
+    // SECURITY-INVARIANT(accounts-second-factor-secret-is-the-sign-in-flows-alone): nobody but the sign-in flow reads
+    // the authenticator secret — the account itself included, once it is on — or writes any of the three fields that
+    // say whether a second factor guards the account. Else a borrowed session could read the secret (and mint every
+    // future code), or clear it, or set one of its own. Stored sealed besides, so a backup or an operator's query is
+    // not a factor either. Guarded by tests/second-factor.test.osy.
+    deny read TotpSecret when !IsAuthenticator;
+    deny update TotpSecret when !IsAuthenticator;
+    deny update TotpLastStep when !IsAuthenticator;
+    deny update SecondFactorOnAt when !IsAuthenticator;
+    // SECURITY-INVARIANT(accounts-phone-is-proven-by-a-code): a phone number is written by the sign-in flow alone, after a
+    // code texted to it came back — so no account can claim a number it does not hold, and with it the sign-ins and the
+    // second step that number carries. And another account's number is nobody's to read. Guarded by tests/sms.test.osy.
+    deny update Phone when !IsAuthenticator;
+    deny update PhoneVerifiedAt when !IsAuthenticator;
+    deny update SmsSecondStep when !IsAuthenticator;
+    deny read Phone when !IsAuthenticator where Id != user.Id;
+    // SECURITY-INVARIANT(accounts-an-address-moves-only-when-the-new-one-confirms): the address that signs in — and that a
+    // reset link goes to — changes only once the NEW address has confirmed it (`ConfirmAddressChange`, SignIn.osy), or
+    // through the desk's recorded change (AssistedChange.osy's run). `Email` is Osysharp.Identity's; this narrows it on
+    // every account the kit makes. Guarded by tests/email.test.osy.
+    deny update Email except via ConfirmAddressChange;
+  }
+}
+
+/// A forgotten-password request: the token is mailed, only its HASH is kept, and it works once, for an hour.
+///
+/// SECURITY-INVARIANT(accounts-reset-token-hashed-single-use): the row holds `Sha256(token)`, never the token, so reading
+/// it — as an operator, from a backup — does not let anybody reset the password; a token works once and not after
+/// `ExpiresAt`. Guarded by tests/reset.test.osy.
+public entity PasswordReset {
+  [Required] User Account;
+  [Required, Unique, MaxLength(64)] string TokenHash;
+  [Required] DateTime ExpiresAt;
+  DateTime? UsedAt;
+  security { allow read, create, update when IsAuthenticator; }
+}
+
+/// A message sent to an address to prove it receives mail — to verify the account's own address, or to confirm a new
+/// one before the account moves to it (`IsChange`).
+///
+/// SECURITY-INVARIANT(accounts-address-proven-by-receipt): only the token's hash is stored and only the sign-in flow
+/// writes a row — so no account can make one whose token it already knows. An address is marked verified, and an
+/// account moves to a new address, only by presenting what a message SENT to that address carried. Guarded by
+/// tests/email.test.osy.
+public entity EmailCheck {
+  [Required] User Account;
+  /// The address the message went to — the one presenting its token proves.
+  [Required, MaxLength(255)] string Email;
+  /// True when proving it moves the account to `Email`.
+  bool IsChange = false;
+  [Required, Unique, MaxLength(64)] string TokenHash;
+  [Required] DateTime ExpiresAt;
+  DateTime? UsedAt;
+  security { allow read, create, update when IsAuthenticator; }
+}
+
+// ── the setup ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// How the app signs people in — `app.Accounts = new AccountsSetup { … }`. Every member has a working default; an app
+/// that sets nothing gets open sign-up, no role for a new account, and pages titled with no name.
+[AppSetting("Accounts")]
+public class AccountsSetup {
+  /// The app's name as a person knows it — on the pages and in the mail.
+  public string AppName = "";
+  /// Whether a visitor may make an account. Closed, accounts come from an operator (`osy user add`) or an invitation.
+  [OrgPolicy(OrgPolicyMode.Lock)] public bool SignupOpen = true;
+  /// The role a new account is given — the app's own. None: no role, which is often right for the public.
+  public role? SignupRole = null;
+  /// The role the FIRST account ever made is given too — whoever sets the app up runs it.
+  public role? FirstAccountRole = null;
+  /// The shortest password accepted. Length is what costs an attacker guesses; a demand for symbols mostly produces
+  /// `Passw0rd!`, so there is none.
+  [OrgPolicy(OrgPolicyMode.Range)] public int MinPasswordLength = 10;
+  /// Refuse to sign in an account whose address has not been proven. Off by default: a mail outage must not become an
+  /// outage of the app.
+  [OrgPolicy(OrgPolicyMode.Lock)] public bool RequireVerifiedEmail = false;
+  /// Whose address must be proven before they are signed in, when not everybody's must — derive and override `Required`
+  /// to say who (e.g. the public, while the team that runs the app signs in at once). `RequireVerifiedEmail` on asks it of
+  /// everybody whatever this says.
+  public AddressProofPolicy AddressProof = new AddressProofPolicy();
+  /// Where a person goes after signing in or up, when they were not on their way somewhere.
+  public string HomePath = "/";
+  /// The mail it sends, one method per kind — derive and override to write your own.
+  public AccountMails Mails = new AccountMails();
+  /// What sign-up makes — a `User`, or the app's own kind of account. Derive and override `New` to make yours.
+  public AccountKinds Kinds = new AccountKinds();
+  /// Who must use two-step sign-in (a code from an authenticator app after the password). Anybody may turn it on from
+  /// the account page; derive and override `Required` to say who MUST — e.g. every admin.
+  public SecondFactorPolicy SecondFactor = new SecondFactorPolicy();
+  /// What happens around an account's sign-in that is the app's own business — a sign-in history, a welcome. Derive
+  /// and override (`Events = new MyEvents()`); by default nothing.
+  public AccountEvents Events = new AccountEvents();
+  /// What the kit's text messages say — derive and override to write your own.
+  public AccountTexts Texts = new AccountTexts();
+  /// Accounts may add a phone number, proven by a texted code (the account page). Off by default; `SmsSignIn` and
+  /// `SmsSecondStep` turn it on too. Needs `app.Sms` (Osysharp.Sms) to reach anybody — until then the codes are held.
+  public bool ProvePhones = false;
+  /// A proven number may sign in with a texted code in place of the password. Off by default: whoever takes over a number
+  /// (a SIM swap, a port-out) could then sign in with it — choose it where that trade is right for the app's people.
+  [OrgPolicy(OrgPolicyMode.Lock)] public bool SmsSignIn = false;
+  /// An account may choose a texted code as its second step after the password. Off by default. ⚠ Never the factor
+  /// `SecondFactor.Required` asks for: an account the app requires a second factor of is asked for an authenticator app.
+  [OrgPolicy(OrgPolicyMode.Lock)] public bool SmsSecondStep = false;
+  /// The app's mark on every sign-in screen, above its name — an address the browser fetches: a file the app keeps
+  /// (`File.Url("public/brand/logo.svg")`) or an https address. None by default: the screens show the name alone. A
+  /// `data:` address is not drawn — the platform keeps them out of every page.
+  public string LogoUrl = "";
+}
+
+/// Whose address must be proven before they are signed in, beyond `RequireVerifiedEmail` (which asks it of everybody). By
+/// default nobody else's; an app that needs it of some people derives and says whose:
+///
+///     public class CustomersProveTheirAddress : AddressProofPolicy {
+///       public override bool Required(User account) { return !(account is Agent); }
+///     }
+///     app.Accounts = new AccountsSetup { …, AddressProof = new CustomersProveTheirAddress() };
+///
+/// Such an account's first sign-in — and its sign-up — answers `MustVerify` and no ticket: a mail with a code and a link
+/// goes to the address, and the sign-in screen takes the code (`AddressCodeStep`). Once proven, it signs in as usual.
+public class AddressProofPolicy {
+  /// Must `account` prove its address before it is signed in? Asked at each sign-in and sign-up of an unproven account.
+  public virtual bool Required(User account) { return false; }
+}
+
+/// Who must use two-step sign-in. By default nobody must and everybody may; an app that needs it for some people
+/// derives and says who:
+///
+///     public class AdminsUseCodes : SecondFactorPolicy {
+///       public override bool Required(User account) {
+///         return RoleGrant.Any(g => g.Member == account && (g.Role == AppRole.Admin || g.Role == AppRole.Lead));
+///       }
+///     }
+///     app.Accounts = new AccountsSetup { …, SecondFactor = new AdminsUseCodes() };
+///
+/// An account that must and has not set it up is taken through setting it up at sign-in, before it is signed in at
+/// all — so there is no page it reaches first.
+public class SecondFactorPolicy {
+  /// Must `account` use two-step sign-in? Asked at each sign-in and sign-up, as the sign-in flow.
+  public virtual bool Required(User account) { return false; }
+}
+
+/// The app's say around a sign-in, without taking the flow over. Every way in ends in `SignedIn` — a password, a code,
+/// a provider, a sign-up, a reset link, and an app's own door that finishes with `ContinueSignIn` — once, when the
+/// ticket is issued, as the sign-in flow (so it may write what only that flow may):
+///
+///     public class Signins : AccountEvents {
+///       public override void SignedIn(User account, DateTime at) { new SignInRecord { Account = account, At = at }; }
+///     }
+///     app.Accounts = new AccountsSetup { …, Events = new Signins() };
+public class AccountEvents {
+  /// `account` was just signed in, at `at` (the instant `LastLoginAt` records).
+  public virtual void SignedIn(User account, DateTime at) { }
+}
+
+/// What kind of account sign-up makes. An app whose people are its own type derives from `User` and says so here:
+///
+///     public class DeskAccounts : AccountKinds {
+///       public override User New(string email, string name) {
+///         return new Agent { Email = email, Name = name, Team = Team.Support, OnShift = true };
+///       }
+///     }
+///     app.Accounts = new AccountsSetup { …, Kinds = new DeskAccounts() };
+///
+/// `email` is already normalised and checked; the row must carry it (it is how the account signs in, and a row is
+/// complete from the moment it is made). The kit then sets everything else sign-in rests on — the password's hash, the
+/// display name — so an override sets only what is the app's own.
+public class AccountKinds {
+  /// A new account for `email`, for a person who gave `name` (their own words, trimmed; empty when they gave none).
+  public virtual User New(string email, string name) { return new User { Email = email }; }
+}
+
+/// How long a reset link works.
+public TimeSpan ResetLifetime() { return TimeSpan.FromHours(1); }
+
+/// How long an address-verification link works.
+public TimeSpan VerificationLifetime() { return TimeSpan.FromDays(3); }
+
+/// What is kept in place of a mailed secret. One-way, so a row is not a credential.
+public string TokenHash(string token) { return Crypto.Sha256Hex(token.Trim()); }
+
+/// "" when the password is acceptable for `email`, else the sentence saying why not.
+public string PasswordProblem(string password, string email) {
+  var min = App.Setting<AccountsSetup>().MinPasswordLength;
+  if (password.Length < min) { return $"Choose a password of at least {min} characters."; }
+  if (password.Length > 128) { return "Choose a password of at most 128 characters."; }
+  if (password.Trim().ToLower() == email.Trim().ToLower()) { return "Choose a password that is not your address."; }
+  return "";
+}
+
+/// The app's name for its pages and mail — its `AppName`, or a plain word when it set none.
+public string AccountsAppName() {
+  var name = App.Setting<AccountsSetup>().AppName;
+  return name == "" ? "your account" : name;
+}
+
+/// What the pages need to know about the setup — never the setup itself, which is server-side (it may hold a mail
+/// sender's credentials).
+public class AccountsFacts {
+  public string AppName = "";
+  public bool SignupOpen = true;
+  public int MinPasswordLength = 10;
+  public string HomePath = "/";
+  public string LogoUrl = "";
+  /// The providers the app offers for signing in (`app.OAuthClients` that may sign people in) — the page's buttons.
+  public List<string> Providers = [];
+  /// What the app lets a phone number do — the account page's phone section and the sign-in page's text-message door.
+  public bool Phones = false;
+  public bool SmsSignIn = false;
+  public bool SmsSecondStep = false;
+}
+
+/// The facts the sign-in pages show — to anybody, since the sign-in pages are for people who are not signed in.
+[AllowAnonymous]
+public AccountsFacts AccountsPageFacts() {
+  var setup = App.Setting<AccountsSetup>();
+  return new AccountsFacts {
+    AppName = AccountsAppName(), SignupOpen = setup.SignupOpen, MinPasswordLength = setup.MinPasswordLength,
+    HomePath = setup.HomePath, LogoUrl = setup.LogoUrl, Providers = Security.SignInProviders(),
+    Phones = PhonesOffered(), SmsSignIn = setup.SmsSignIn, SmsSecondStep = setup.SmsSecondStep,
+  };
+}
+
+/// The signed-in account, or null.
+public User? Me() {
+  var me = Session.CurrentUser;
+  if (me is User u) { return u; }
+  return null;
+}

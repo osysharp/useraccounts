@@ -1,0 +1,216 @@
+// ACCOUNT PRE-HIJACKING.
+//
+// A stranger signs up first with somebody else's address and a password of their own. The address's owner later proves
+// the address — by the link or the code its mail carried. Proven that way, the account must not keep the STRANGER's
+// password (or anything else the stranger set up while signed in): the owner must never be given an account somebody
+// else can still open.
+//
+// THE DISCRIMINATOR: the first proof of an account's own address, on an account that already has a password, proves the
+// address only TOGETHER WITH that password — which the sign-up and sign-in screens pass along with the code they just
+// asked for, so the person who made the account is never asked twice — or with a NEW password, which starts the account
+// over for whoever holds the address. Receiving the mail says who holds the address; only the password says whether that
+// is who chose it. SECURITY-INVARIANT(accounts-first-proof-claims-the-account).
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void Strangers() {
+  // Somebody already here, so the stranger's account is not the app's first (which this desk makes an admin).
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+             EmailVerifiedAt = DateTime.UtcNow };
+}
+
+void StrangersNeedProof() { AddressProofRequired.Stub(() => true); }
+
+bool Proven(string email) {
+  bool proven = false;
+  runas (AuthBootstrap) { proven = User.Single(u => u.Email == email).EmailVerifiedAt != null; }
+  return proven;
+}
+
+/// Does `password` sign `email` in — a ticket, or the code a second factor asks for next?
+bool Opens(string email, string password) {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn(email, password); }
+  return step.Ticket != "" || step.Challenge != "";
+}
+
+// ── the stranger loses the account ──────────────────────────────────────────────────────────────────────────────────
+
+[Test(Strangers)]
+void a_strangers_password_stops_working_once_the_owner_proves_the_address_by_its_link() {
+  runas (AuthBootstrap) { SignUp("owner@desk.test", "strangers-password-1", "Mallory"); }
+  Assert.True(Opens("owner@desk.test", "strangers-password-1"));
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("owner@desk.test", "/verify-email/"); }
+  // The link alone proves nothing yet: whoever opens it is asked for the password the account was made with, or a new one.
+  SignInStep asked = new SignInStep();
+  runas (AuthBootstrap) { asked = VerifyEmail(token); }
+  Assert.True(asked.MustConfirmPassword);
+  Assert.Equal("", asked.Ticket);
+  Assert.False(Proven("owner@desk.test"));
+  // The owner does not know the stranger's password, and chooses their own.
+  SignInStep claimed = new SignInStep();
+  runas (AuthBootstrap) { claimed = VerifyEmail(token, "", "owners-own-password"); }
+  Assert.NotEqual("", claimed.Ticket);
+  Assert.True(Proven("owner@desk.test"));
+  Assert.False(Opens("owner@desk.test", "strangers-password-1"));
+  Assert.True(Opens("owner@desk.test", "owners-own-password"));
+}
+
+[Test(Strangers)]
+void a_strangers_password_stops_working_once_the_owner_proves_the_address_by_its_code() {
+  StrangersNeedProof();
+  runas (AuthBootstrap) { SignUp("owner@desk.test", "strangers-password-1", "Mallory"); }
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("owner@desk.test"); }
+  SignInStep asked = new SignInStep();
+  runas (AuthBootstrap) { asked = VerifyEmailCode("owner@desk.test", code); }
+  Assert.True(asked.MustConfirmPassword);
+  Assert.False(Proven("owner@desk.test"));
+  SignInStep claimed = new SignInStep();
+  runas (AuthBootstrap) { claimed = VerifyEmailCode("owner@desk.test", code, "", "owners-own-password"); }
+  Assert.NotEqual("", claimed.Ticket);
+  Assert.True(Proven("owner@desk.test"));
+  Assert.False(Opens("owner@desk.test", "strangers-password-1"));
+  Assert.True(Opens("owner@desk.test", "owners-own-password"));
+}
+
+[Test(Strangers)]
+void everything_the_stranger_set_up_before_the_proof_is_cleared() {
+  // The app does not require a proven address, so the stranger is signed in at once and can set things up: an
+  // authenticator of their own, and their own Google account as a way in.
+  runas (AuthBootstrap) { SignUp("owner@desk.test", "strangers-password-1", "Mallory"); }
+  var key = NewSecondFactorSetup("owner@desk.test").Key;
+  runas (AuthBootstrap) {
+    EnableSecondFactor("owner@desk.test", "strangers-password-1", key, Totp.Code(key));
+    LinkProvider("owner@desk.test", "strangers-password-1", TestOAuth.PendingToken("mallory@evil.test", "Google"),
+                 Totp.Code(key, DateTime.UtcNow.AddSeconds(30)));
+  }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("owner@desk.test", "/verify-email/"); }
+  SignInStep claimed = new SignInStep();
+  runas (AuthBootstrap) { claimed = VerifyEmail(token, "", "owners-own-password"); }
+  // Straight in — the stranger's authenticator is not the owner's second step…
+  Assert.NotEqual("", claimed.Ticket);
+  Assert.Equal("", claimed.Challenge);
+  runas (AuthBootstrap) { Assert.Null(User.Single(u => u.Email == "owner@desk.test").TotpSecret); }
+  // …and the stranger's Google account no longer opens the owner's: signing in with it makes an account of its own.
+  runas (AuthBootstrap) { SignInWithProvider(TestOAuth.PendingToken("mallory@evil.test", "Google")); }
+  runas (AuthBootstrap) { Assert.True(User.Any(u => u.Email == "mallory@evil.test")); }
+}
+
+[Test(Strangers)]
+void a_reset_link_that_first_proves_the_address_clears_what_the_stranger_set_up_too() {
+  runas (AuthBootstrap) { SignUp("owner@desk.test", "strangers-password-1", "Mallory"); }
+  var key = NewSecondFactorSetup("owner@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("owner@desk.test", "strangers-password-1", key, Totp.Code(key)); }
+  // The owner, told by a sign-up that the address has an account, asks for a reset instead.
+  runas (AuthBootstrap) { RequestPasswordReset("owner@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("owner@desk.test", "/reset-password/"); }
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = ResetPassword(token, "owners-own-password"); }
+  // Signed in: a reset of an address nobody had proven is not held behind the stranger's authenticator.
+  Assert.NotEqual("", ticket);
+  Assert.False(Opens("owner@desk.test", "strangers-password-1"));
+  runas (AuthBootstrap) { Assert.Null(User.Single(u => u.Email == "owner@desk.test").TotpSecret); }
+}
+
+// ── the stranger's SESSION ends too ──────────────────────────────────────────────────────────────
+// With a proven address not required, the stranger was signed in at sign-up and holds a ticket good for a day. The
+// claim ends it: SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change). Used over HTTP before and after.
+
+[Test(Strangers)]
+void the_strangers_ticket_stops_working_the_moment_the_owner_claims_the_account() {
+  SignInStep up = new SignInStep();
+  runas (AuthBootstrap) { up = SignUp("owner@desk.test", "strangers-password-1", "Mallory"); }
+  Assert.Equal(200, Api.Get("/account", bearer: up.Ticket).StatusCode);
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("owner@desk.test", "/verify-email/"); }
+  SignInStep claimed = new SignInStep();
+  runas (AuthBootstrap) { claimed = VerifyEmail(token, "", "owners-own-password"); }
+
+  var refused = Api.Get("/account", bearer: up.Ticket);
+  Assert.Equal(401, refused.StatusCode);
+  Assert.Contains("password was changed or reset in another session", refused.Body);
+  Assert.Equal(200, Api.Get("/account", bearer: claimed.Ticket).StatusCode);
+}
+
+[Test(Strangers)]
+void the_maker_who_proves_with_their_own_password_stays_signed_in() {
+  SignInStep up = new SignInStep();
+  runas (AuthBootstrap) { up = SignUp("nils@desk.test", "nils-own-password", "Nils"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("nils@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { VerifyEmail(token, "nils-own-password"); }
+  Assert.True(Proven("nils@desk.test"));
+  // Nothing about the way in changed, so the ticket the sign-up gave goes on working.
+  Assert.Equal(200, Api.Get("/account", bearer: up.Ticket).StatusCode);
+}
+
+// ── the person who made the account is not asked twice ──────────────────────────────────────────────────────────────
+
+[Test(Strangers)]
+void an_ordinary_sign_up_proves_its_address_with_the_code_and_the_password_it_just_chose() {
+  StrangersNeedProof();
+  SignInStep up = new SignInStep();
+  runas (AuthBootstrap) { up = SignUp("nils@desk.test", "nils-own-password", "Nils"); }
+  Assert.True(up.MustVerify);
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("nils@desk.test"); }
+  // What the sign-up screen sends: the code, and the password it just took — one step, straight in.
+  SignInStep proven = new SignInStep();
+  runas (AuthBootstrap) { proven = VerifyEmailCode("nils@desk.test", code, "nils-own-password"); }
+  Assert.False(proven.MustConfirmPassword);
+  Assert.NotEqual("", proven.Ticket);
+  Assert.True(Proven("nils@desk.test"));
+  Assert.True(Opens("nils@desk.test", "nils-own-password"));
+}
+
+[Test(Strangers)]
+void the_maker_who_confirms_with_their_password_keeps_what_they_set_up() {
+  runas (AuthBootstrap) { SignUp("nils@desk.test", "nils-own-password", "Nils"); }
+  var key = NewSecondFactorSetup("nils@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("nils@desk.test", "nils-own-password", key, Totp.Code(key)); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("nils@desk.test", "/verify-email/"); }
+  SignInStep proven = new SignInStep();
+  runas (AuthBootstrap) { proven = VerifyEmail(token, "nils-own-password"); }
+  // Proven, and the sign-in carries on as one would: Nils's own authenticator is asked for next.
+  Assert.True(Proven("nils@desk.test"));
+  Assert.NotEqual("", proven.Challenge);
+  runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "nils@desk.test").TotpSecret); }
+}
+
+[Test(Strangers)]
+void a_wrong_password_with_the_right_code_proves_nothing_and_spends_nothing() {
+  StrangersNeedProof();
+  runas (AuthBootstrap) { SignUp("owner@desk.test", "strangers-password-1", "Mallory"); }
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("owner@desk.test"); }
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmailCode("owner@desk.test", code, "a-guess-at-it")); }
+  Assert.False(Proven("owner@desk.test"));
+  // The code still works — with a password of the owner's own.
+  SignInStep claimed = new SignInStep();
+  runas (AuthBootstrap) { claimed = VerifyEmailCode("owner@desk.test", code, "", "owners-own-password"); }
+  Assert.NotEqual("", claimed.Ticket);
+}
+
+// A link mailed to an address the account has since LEFT proves nothing — and is refused outright, not answered with the
+// first-proof question (which would offer to set a password on the strength of a mail to somebody else's address).
+[TestFixture]
+void MovedAway() {
+  var ada = new User { Email = "ada-now@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1") };
+  new EmailCheck { Account = ada, Email = "ada-then@desk.test", TokenHash = TokenHash("a-token-mailed-to-the-old-address-00001"),
+                   ExpiresAt = DateTime.UtcNow.AddDays(1) };
+}
+
+[Test(MovedAway)]
+void a_first_proof_link_for_an_address_the_account_has_left_is_refused_before_anything_is_asked() {
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail("a-token-mailed-to-the-old-address-00001")); }
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail("a-token-mailed-to-the-old-address-00001", "", "a-new-password-1")); }
+  Assert.False(Proven("ada-now@desk.test"));
+  Assert.True(Opens("ada-now@desk.test", "correct-horse-1"));
+}

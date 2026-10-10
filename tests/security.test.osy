@@ -1,0 +1,65 @@
+// The credential rules the kit guarantees — by construction, on `User` and on an app's own subtype of it.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void Team() {
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1") };
+  new Employee { Email = "eve@desk.test", DisplayName = "Eve", PasswordHash = Security.HashPassword("battery-staple-2"),
+                 Department = "Ops" };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+principal Eve => User.Single(u => u.Email == "eve@desk.test");
+
+[Test(Team)]
+void a_signed_in_person_sees_colleagues_but_never_a_hash_their_own_included() {
+  runas (Ada) {
+    Assert.Equal("Eve", User.Single(u => u.Email == "eve@desk.test").DisplayName);
+    Assert.Null(User.Single(u => u.Email == "eve@desk.test").PasswordHash);
+    Assert.Null(MyHash());
+  }
+  // The sign-in flow reads it — the positive half, without which the nulls above prove nothing.
+  runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "ada@desk.test").PasswordHash); }
+}
+
+[Test(Team)]
+void the_hash_of_an_apps_own_kind_of_user_is_masked_too() {
+  runas (Ada) {
+    Assert.Null(Employee.Single(e => e.Email == "eve@desk.test").PasswordHash);
+    Assert.Equal("Ops", Employee.Single(e => e.Email == "eve@desk.test").Department);
+  }
+  runas (Eve) { Assert.Null(MyHash()); }
+}
+
+[Test(Team)]
+void nobody_signed_in_writes_a_hash_their_own_included() {
+  runas (Ada) { Assert.Denied(() => SetPassword("ada@desk.test", "chosen-by-me-1")); }
+  runas (Ada) { Assert.Denied(() => SetPassword("eve@desk.test", "chosen-by-me-1")); }
+}
+
+[Test(Team)]
+void a_signed_in_person_cannot_make_accounts_or_grant_roles() {
+  runas (Ada) { Assert.Denied(() => new User { Email = "sock@desk.test", PasswordHash = Security.HashPassword("x-long-enough") }); }
+  runas (Ada) { Assert.Denied(() => new RoleGrant { Member = Ada, Role = AppRole.Admin }); }
+}
+
+[Test(Team)]
+void a_person_edits_their_own_name_and_no_one_elses() {
+  runas (Ada) { Rename("ada@desk.test", "Ada L."); }
+  runas (Ada) { Assert.Equal("Ada L.", User.Single(u => u.Email == "ada@desk.test").DisplayName); }
+  runas (Ada) { Assert.Denied(() => Rename("eve@desk.test", "Mallory")); }
+}
+
+[Test(Team)]
+void the_password_changes_only_with_the_current_one_and_the_owner_is_told() {
+  runas (AuthBootstrap) { Assert.Throws(() => ChangePassword("ada@desk.test", "not-it", "a-brand-new-one")); }
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = ChangePassword("ada@desk.test", "correct-horse-1", "a-brand-new-one"); }
+  Assert.NotEqual("", ticket);
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("ada@desk.test", "Your Kit Test Desk password was changed")); }
+  string withNew = "";
+  runas (AuthBootstrap) { withNew = SignIn("ada@desk.test", "a-brand-new-one").Ticket; }
+  Assert.NotEqual("", withNew);
+}

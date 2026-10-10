@@ -1,0 +1,99 @@
+// An address change the desk makes for somebody whose old address is gone — at once, with the reason recorded, and both
+// addresses told. The person's own change keeps its link (email.test.osy).
+// SECURITY-INVARIANT(accounts-a-staff-address-change-is-named-recorded-and-told).
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void AssistedDesk() {
+  var bo = new User { Email = "bo@desk.test", DisplayName = "Bo", PasswordHash = Security.HashPassword("correct-horse-2"),
+                      EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = bo, Role = AppRole.Member };
+  var lead = new User { Email = "lead@desk.test", DisplayName = "Lead", PasswordHash = Security.HashPassword("correct-horse-3"),
+                        EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = lead, Role = AppRole.Admin };
+}
+
+principal Bo => User.Single(u => u.Email == "bo@desk.test");
+principal Lead => User.Single(u => u.Email == "lead@desk.test");
+
+/// What a direct write of a change would be — refused, whoever tries it.
+void StartDirectly(string email, string address) {
+  new AddressChangeRequest { Account = User.Single(u => u.Email == email), NewAddress = address, Reason = "because" };
+}
+
+[Test(AssistedDesk)]
+void the_desk_moves_the_account_at_once_and_records_who_and_why() {
+  runas (Lead) { ChangeAddressFor(User.Single(u => u.Email == "bo@desk.test"), "Bo.Home@desk.test", "ID checked at the desk"); }
+  runas (AuthBootstrap) {
+    // Moved now — no confirmation from either address.
+    Assert.Equal("bo.home@desk.test", User.Single(u => u.DisplayName == "Bo").Email);
+    Assert.False(User.Any(u => u.Email == "bo@desk.test"));
+    // The record: from where, to where, why, and by whom.
+    var change = AddressChangeRequest.Single();
+    Assert.Equal("bo@desk.test", change.OldAddress);
+    Assert.Equal("bo.home@desk.test", change.NewAddress);
+    Assert.Equal("ID checked at the desk", change.Reason);
+    Assert.Equal(User.Single(u => u.Email == "lead@desk.test").Id, change.MadeBy);
+    Assert.Equal(AddressChangeState.Moved, change.State);
+    // Both addresses told; nothing to click in either.
+    Assert.Equal(1, MailsTo("bo@desk.test", "Your Kit Test Desk address was changed"));
+    Assert.Equal(1, MailsTo("bo.home@desk.test", "Your Kit Test Desk account now uses this address"));
+    Assert.Equal("", TokenIn("bo.home@desk.test", "/verify-email/"));
+    Assert.Equal("", TokenIn("bo@desk.test", "/verify-email/"));
+  }
+  // Bo signs in with the new address and the password he had.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("bo.home@desk.test", "correct-horse-2").Ticket); }
+}
+
+[Test(AssistedDesk)]
+void a_change_the_person_had_started_elsewhere_is_spent_by_the_desks() {
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.old-idea@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("bo.old-idea@desk.test", "/verify-email/"); }
+  Assert.NotEqual("", token);
+  runas (Lead) { ChangeAddressFor(User.Single(u => u.Email == "bo@desk.test"), "bo.home@desk.test", "ID checked at the desk"); }
+  runas (AuthBootstrap) {
+    Assert.Throws(() => VerifyEmail(token));
+    Assert.Equal("bo.home@desk.test", User.Single(u => u.DisplayName == "Bo").Email);
+  }
+}
+
+[Test(AssistedDesk)]
+void a_desk_change_needs_a_reason() {
+  runas (Lead) {
+    Assert.Contains("Say why", Assert.Throws(() => ChangeAddressFor(User.Single(u => u.Email == "bo@desk.test"), "bo.home@desk.test", "  ")).Message);
+  }
+  runas (AuthBootstrap) { Assert.True(User.Any(u => u.Email == "bo@desk.test")); }
+}
+
+[Test(AssistedDesk)]
+void nobody_the_app_did_not_name_may_make_one() {
+  runas (Bo) {
+    Assert.Throws<NotAuthorized>(() => ChangeAddressFor(User.Single(u => u.Email == "bo@desk.test"), "bo.x@desk.test", "mine"));
+  }
+  runas (AuthBootstrap) {
+    Assert.True(User.Any(u => u.Email == "bo@desk.test"));
+    Assert.Equal(0, MailsTo("bo.x@desk.test", ""));
+  }
+}
+
+[Test(AssistedDesk)]
+void the_desk_cannot_move_an_account_itself_or_make_a_change_but_through_the_kit() {
+  runas (Lead) {
+    Assert.Denied(() => MoveAddress("bo@desk.test", "lead.owns@desk.test"));
+    Assert.Denied(() => StartDirectly("bo@desk.test", "lead.owns@desk.test"));
+  }
+  runas (AuthBootstrap) {
+    Assert.True(User.Any(u => u.Email == "bo@desk.test"));
+    Assert.Equal(0, MailsTo("lead.owns@desk.test", ""));
+  }
+}
+
+[Test(AssistedDesk)]
+void a_desk_change_to_an_address_another_account_uses_is_refused() {
+  runas (Lead) {
+    Assert.Throws(() => ChangeAddressFor(User.Single(u => u.Email == "bo@desk.test"), "lead@desk.test", "ID checked at the desk"));
+  }
+}

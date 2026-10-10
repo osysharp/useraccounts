@@ -1,0 +1,156 @@
+// Sign in with a provider — Google, GitHub, Microsoft, any OpenID Connect issuer the app declares in `app.OAuthClients`.
+//
+// The platform's OAuth callback verifies who the provider says this is and hands that, sealed, to the kit's
+// `/oauth/sign-in` page; it never signs anybody in by itself for an app using this kit (the `OAuthSignIn` slot is what
+// tells it so). `SignInWithProvider` then decides, in this order:
+//   1. an identity already LINKED to an account signs in to that account;
+//   2. otherwise an account whose address the provider verified AND the account itself has proven is linked to it, and
+//      signs in — an address nobody has proven here is never enough to take an account over;
+//   3. otherwise, when the app lets visitors sign up, a new account is made for that address (proven already: the
+//      provider verified it); when it does not, the answer is `NoAccount`.
+// Whichever account it is, the rest of sign-in is the same as after a password: a code when two-step sign-in is on, or
+// setting it up first when the app requires it of that account (`AccountsSetup.SecondFactor`).
+//
+// ⚑ LINKING AND UNLINKING FROM THE ACCOUNT PAGE ask for the password (and a code, with two-step sign-in on), like every
+//   other change to how an account signs in: a borrowed session must not be able to add a way in of its own.
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Mail;
+
+/// Who a provider sign-in is for, as its sign-in page shows it — to the person holding the sealed token, who is the
+/// person the provider just verified.
+public class ProviderIdentity {
+  public string Provider = "";
+  public string Email = "";
+}
+
+/// The provider and the verified address a provider sign-in carries ("" and "" for a token that is not good).
+[AllowAnonymous]
+public ProviderIdentity ProviderIdentityOf(string pendingToken) {
+  return new ProviderIdentity { Provider = Security.PendingOAuthProvider(pendingToken),
+                                Email = Security.VerifyPendingOAuthEmail(pendingToken) };
+}
+
+/// Sign in with a provider: the sealed token the provider sign-in page was handed. Answers a `SignInStep` — see the
+/// order at the top of this file. Throws the sentence to show when the provider did not verify an address, or when an
+/// account has the address but has not proven it.
+///
+/// SECURITY-INVARIANT(accounts-provider-matched-by-verified-address): a provider identity is attached to an existing
+/// account only when the provider verified the address AND the account has proven it here (`EmailVerifiedAt`) —
+/// never by an address alone. Else anybody could make an account in a victim's name with a password of their own, wait
+/// for the victim to "Continue with Google", and share the account. Guarded by tests/providers.test.osy.
+[AuthMethod]
+public SignInStep SignInWithProvider(string pendingToken) {
+  var linked = Security.PendingOAuthLinkedUser(pendingToken);
+  if (linked != null) {
+    var mine = User.FirstOrDefault(u => u.Id == linked.Value);
+    if (mine == null || !mine.IsActive) { return new SignInStep(); }
+    return ContinueSignIn(mine);
+  }
+  var verified = Security.VerifyPendingOAuthEmail(pendingToken);
+  if (verified == "") {
+    throw new ValidationException("That sign-in could not be verified, or the provider has not confirmed your address — start again from the sign-in page.");
+  }
+  var address = NormalisedEmail(verified);
+  var provider = Security.PendingOAuthProvider(pendingToken);
+  var setup = App.Setting<AccountsSetup>();
+  var account = User.FirstOrDefault(u => u.Email == address);
+  if (account != null) {
+    if (!account.IsActive) { return new SignInStep(); }
+    if (account.EmailVerifiedAt == null) {
+      // The account has not proven the address; the provider's word is not enough to hand it over. Its owner gets a
+      // link (kept past the throw), and can link the provider from the account page once in.
+      EnsureVerification(account);
+      UnitOfWork.Commit();
+      throw new ValidationException($"There is an account for {address}, but it has not confirmed its address yet. We have sent a link to confirm it — then sign in with {provider} again, or sign in with your password.");
+    }
+    Security.LinkOAuthFromPending(account.Id, pendingToken);
+    SendRendered(account.Email, setup.Mails.ProviderLinked(account, provider));
+    return ContinueSignIn(account);
+  }
+  // Some other kind of account (not a `User`) has the address: it does not sign in here, and a new `User` cannot take it.
+  if (Principal.Any(p => p.Email == address)) { return new SignInStep(); }
+  if (!setup.SignupOpen) { return new SignInStep { NoAccount = true, Account = address }; }
+  return SignUpWithProvider(pendingToken, address);
+}
+
+/// A new account for a provider-verified address: proven already, no password, linked to the provider — then the step
+/// after it (setting two-step sign-in up first, when the app requires it).
+SignInStep SignUpWithProvider(string pendingToken, string address) {
+  var setup = App.Setting<AccountsSetup>();
+  var first = !Principal.Any(p => p.Email != address);
+  var now = DateTime.UtcNow;
+  var given = Security.PendingOAuthName(pendingToken).Trim();
+  var account = setup.Kinds.New(address, given);
+  if (account.Email != address) {
+    throw new ValidationException("The app's AccountKinds.New made an account for another address — it must use the one it was given.");
+  }
+  account.EmailVerifiedAt = now;
+  account.LastLoginAt = now;
+  account.DisplayName = given != "" ? given : address.Substring(0, address.IndexOf("@"));
+  // The same roles a password sign-up is given, told to the app the same way —
+  // SECURITY-INVARIANT(accounts-signup-grants-only-the-apps-choice).
+  GrantNewAccountRoles(account, first);
+  Security.LinkOAuthFromPending(account.Id, pendingToken);
+  if (setup.SecondFactor.Required(account)) { return MustEnrol(account); }
+  return new SignInStep { Ticket = Admit(account) };
+}
+
+/// Link a provider to the account, from its account page: the address and CURRENT password (and a current code with
+/// two-step sign-in on), and the sealed token the provider sign-in page was handed. Answers "", or throws the sentence
+/// to show. The owner is told by mail.
+[AuthMethod]
+public string LinkProvider(string email, string password, string pendingToken, string code = "") {
+  var account = Verified(email, password);
+  if (account.TotpSecret != null) { RequireCode(account, code); }
+  var provider = Security.PendingOAuthProvider(pendingToken);
+  if (provider == "") {
+    throw new ValidationException("That sign-in could not be verified, or the provider has not confirmed your address — start again.");
+  }
+  var linked = Security.PendingOAuthLinkedUser(pendingToken);
+  if (linked != null) {
+    if (linked.Value == account.Id) { return ""; }
+    throw new ValidationException($"That {provider} account already signs in to another account here.");
+  }
+  if (Security.OAuthLinkedProviders(account.Id).Contains(provider)) {
+    throw new ValidationException($"A {provider} account already signs in to this one — unlink it first.");
+  }
+  Security.LinkOAuthFromPending(account.Id, pendingToken);
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.ProviderLinked(account, provider));
+  return "";
+}
+
+/// Stop a provider signing in to the account: the address and CURRENT password (and a current code with two-step
+/// sign-in on). An account needs its password to do this, so it can never unlink its last way in. Answers "", or throws
+/// the sentence to show. The owner is told by mail.
+[AuthMethod]
+public string UnlinkProvider(string email, string password, string provider, string code = "") {
+  var account = Verified(email, password);
+  if (account.TotpSecret != null) { RequireCode(account, code); }
+  if (!Security.UnlinkOAuth(account.Id, provider)) {
+    throw new ValidationException($"{provider} does not sign in to this account.");
+  }
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.ProviderUnlinked(account, provider));
+  return "";
+}
+
+/// The providers that sign in to the signed-in account, and the ones the app offers — for its account page.
+public class ProviderFacts {
+  public List<string> Linked = [];
+  public List<string> Offered = [];
+}
+
+/// The signed-in account's providers. Runs as the account itself: it answers only about its own.
+public ProviderFacts MyProviders() {
+  var me = Me();
+  var facts = new ProviderFacts { Offered = Security.SignInProviders() };
+  if (me != null) { facts.Linked = Security.OAuthLinkedProviders(me.Id); }
+  return facts;
+}
+
+/// Where a "Continue with …" button goes: the platform's provider sign-in, which comes back to `/oauth/sign-in`.
+public string ProviderSignInAddress(string provider) {
+  return $"/api/oauth/authorize?provider={Uri.EscapeDataString(provider)}";
+}

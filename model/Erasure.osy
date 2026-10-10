@@ -1,0 +1,64 @@
+// Erasing an account — what a person's right to erasure (GDPR art. 17) asks of the sign-in kit, done by the kit that
+// knows every table it keeps about them. A kit built on this one (a shop's erasure run) or the app's own erasure run
+// calls it; it never decides on its own WHETHER somebody may be erased — that is the caller's.
+//
+// ⚑ THE ROW STAYS, THE PERSON GOES. Work the account did still names it (an order, a reply, a change it made), so the
+//   row is kept — unable to sign in, with no address anybody could reach and no way in left — and everything that says
+//   who it was is cleared: the address, the name, the phone, the password, two-step sign-in, linked providers, roles, and
+//   every link and code ever mailed or texted to it, and the outbox's copies of that mail.
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Mail;
+
+/// The address an erased account is left with: unique (the column is), and on a domain that cannot receive mail.
+public string ErasedAddress(Principal account) { return $"erased-{account.Id}@erased.invalid"; }
+
+/// Erase `account`: every way in, every way to reach it, and every record of how it signed in. Written as the run that
+/// erases — a workflow body, as the system — so call it from one: in a request the kit's own rules refuse it, as they
+/// refuse every other write to an account's address and credentials.
+///
+/// SECURITY-INVARIANT(accounts-an-erased-account-has-no-way-in): after `EraseAccount` the account is inactive, has no
+/// password, no second factor, no phone, no linked provider and no role, every session it had is ended, and no reset
+/// link, address link or code issued to it still works. Guarded by tests/erasure.test.osy.
+[SuppressWarning("cost-unbounded-read")]   // one person's links, codes and mail — an erasure reaches every one
+public void EraseAccount(User account) {
+  var address = account.Email;
+  Security.EndOtherSessions(account.Id);
+  foreach (var provider in Security.OAuthLinkedProviders(account.Id)) { Security.UnlinkOAuth(account.Id, provider); }
+  foreach (var r in PasswordReset.Where(r => r.Account == account).ToList()) { r.Delete(); }
+  foreach (var c in OneTimeCode.Where(c => c.Account == account).ToList()) { c.Delete(); }
+  foreach (var c in EmailCheck.Where(c => c.Account == account).ToList()) { c.Delete(); }
+  foreach (var c in SignInChallenge.Where(c => c.Account == account).ToList()) { c.Delete(); }
+  foreach (var c in RecoveryCode.Where(c => c.Account == account).ToList()) { c.Delete(); }
+  foreach (var m in SecondFactorMiss.Where(m => m.Account == account).ToList()) { m.Delete(); }
+  foreach (var s in StepUp.Where(s => s.Account == account).ToList()) { s.Destination = ""; }
+  foreach (var c in AddressChangeRequest.Where(c => c.Account == account).ToList()) {
+    c.OldAddress = "";
+    c.NewAddress = "erased";
+    c.Reason = "(erased at the person's request)";
+  }
+  // A managed account's record names the person it was made for, and who looks after them: the name goes with the
+  // person, and an erased guardian looks after nobody.
+  foreach (var m in ManagedAccountRequest.Where(m => m.Account == account).ToList()) { m.Name = "(erased)"; }
+  foreach (var m in ManagedAccountRequest.Where(m => m.Guardian == account).ToList()) { m.Guardian = null; }
+  foreach (var m in ManagedAccountAddress.Where(m => m.Account == account).ToList()) { m.Address = "erased"; }
+  foreach (var g in RoleGrant.Where(g => g.Member == account).ToList()) { g.Delete(); }
+  foreach (var g in RoleGivenAtSignup.Where(g => g.Member == account).ToList()) { g.Delete(); }
+  EraseMailTo(address);
+  account.Email = ErasedAddress(account);
+  account.DisplayName = "";
+  account.IsActive = false;
+  account.ExternalId = null;
+  account.PasswordHash = null;
+  account.PasswordChangedAt = null;
+  account.TotpSecret = null;
+  account.TotpLastStep = -1;
+  account.SecondFactorOnAt = null;
+  account.Phone = null;
+  account.PhoneVerifiedAt = null;
+  account.SmsSecondStep = false;
+  account.ApiKeyHash = null;
+  account.ApiKeyHash2 = null;
+}

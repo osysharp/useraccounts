@@ -1,0 +1,97 @@
+// Step-up — proving it is you, now: a code mailed to the account's own address, typed back by the signed-in person,
+// spent once by the action it was asked for. A session left open somewhere cannot prove anything on its own.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+using Osysharp.Mail;
+
+[TestFixture]
+void Pair() {
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+             EmailVerifiedAt = DateTime.UtcNow };
+  new User { Email = "bo@desk.test", DisplayName = "Bo", PasswordHash = Security.HashPassword("correct-horse-2"),
+             EmailVerifiedAt = DateTime.UtcNow };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+principal Bo => User.Single(u => u.Email == "bo@desk.test");
+
+StepUp Started(Guid id) { return StepUp.Single(s => s.Id == id); }
+
+[Test(Pair)]
+void a_step_up_mails_a_code_to_the_accounts_own_address_and_the_code_proves_it() {
+  StepUp? s = null;
+  runas (Ada) {
+    s = StartStepUp(CodePurpose.PrivacyRequest);
+    Workflow.Settle(Started(s!.Id));
+    Assert.Equal(StepUpState.Waiting, Started(s!.Id).State);
+    Assert.Equal("a•••@desk.test", MaskedEmail(Started(s!.Id).Destination));
+  }
+  var code = "";
+  runas (AuthBootstrap) {
+    code = CodeIn("ada@desk.test");
+    Assert.Equal(1, MailsTo("ada@desk.test", "Your code for"));
+  }
+  runas (Ada) {
+    Assert.Equal("", ProveStepUp(Started(s!.Id), code));
+    Assert.Equal(StepUpState.Proven, Started(s!.Id).State);
+    Assert.NotNull(Started(s!.Id).ProvenAt);
+  }
+}
+
+[Test(Pair)]
+void a_wrong_code_proves_nothing_and_the_fifth_ends_it() {
+  StepUp? s = null;
+  runas (Ada) { s = StartStepUp(CodePurpose.PrivacyRequest); Workflow.Settle(Started(s!.Id)); }
+  runas (Ada) {
+    Assert.Contains("not right", ProveStepUp(Started(s!.Id), "000000"));
+    Assert.Equal(StepUpState.Waiting, Started(s!.Id).State);
+    Assert.Equal(1, Started(s!.Id).Misses);
+    for (var i = 0; i < 4; i++) { ProveStepUp(Started(s!.Id), "000000"); }
+    Assert.Equal(StepUpState.Lapsed, Started(s!.Id).State);
+    Assert.Contains("no longer works", ProveStepUp(Started(s!.Id), "000000"));
+  }
+}
+
+[Test(Pair)]
+void a_step_up_lapses_after_fifteen_minutes() {
+  StepUp? s = null;
+  runas (Ada) { s = StartStepUp(CodePurpose.PrivacyRequest); Workflow.Settle(Started(s!.Id)); }
+  var code = "";
+  runas (AuthBootstrap) { code = CodeIn("ada@desk.test"); }
+  TestClock.Advance(TimeSpan.FromMinutes(16));
+  runas (Ada) {
+    Workflow.Settle(Started(s!.Id));
+    Assert.Equal(StepUpState.Lapsed, Started(s!.Id).State);
+    Assert.Contains("no longer works", ProveStepUp(Started(s!.Id), code));
+  }
+}
+
+[Test(Pair)]
+void nobody_proves_or_spends_somebody_elses_step_up() {
+  StepUp? s = null;
+  runas (Ada) { s = StartStepUp(CodePurpose.PrivacyRequest); Workflow.Settle(Started(s!.Id)); }
+  var code = "";
+  runas (AuthBootstrap) { code = CodeIn("ada@desk.test"); }
+  runas (Bo) {
+    // Bo cannot see Ada's step-up, nor raise its code — with the right code in hand.
+    Assert.Equal(0, StepUp.Count(x => x.Id == s!.Id));
+    Assert.Denied(() => StepUpProof.RaiseProve(s!, code));
+    // Nor make one for her account.
+    Assert.Denied(() => { new StepUp { Account = User.Single(u => u.Email == "ada@desk.test"), Purpose = CodePurpose.PrivacyRequest }; UnitOfWork.Commit(); });
+  }
+  runas (Ada) {
+    Assert.Equal("", ProveStepUp(Started(s!.Id), code));
+    // A person cannot spend their own proof — only the action it was asked for, as the system.
+    Assert.Denied(() => { SpendStepUp(s!.Id, Started(s!.Id).Account.Id, CodePurpose.PrivacyRequest, TimeSpan.FromMinutes(10)); UnitOfWork.Commit(); });
+  }
+}
+
+[Test(Pair)]
+void a_step_up_cannot_be_made_already_proven() {
+  runas (Ada) {
+    var ada = User.Single(u => u.Email == "ada@desk.test");
+    Assert.Denied(() => { new StepUp { Account = ada, Purpose = CodePurpose.PrivacyRequest, ProvenAt = DateTime.UtcNow }; UnitOfWork.Commit(); });
+    Assert.Denied(() => { new StepUp { Account = ada, Purpose = CodePurpose.PrivacyRequest, Destination = "mallory@evil.test" }; UnitOfWork.Commit(); });
+  }
+}

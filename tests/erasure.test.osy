@@ -1,0 +1,42 @@
+// Erasing an account (`EraseAccount`): the row stays, every way in and every way to reach the person goes.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void Leaving() {
+  var ada = new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+                       EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = ada, Role = AppRole.Member };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+
+// SECURITY-INVARIANT(accounts-an-erased-account-has-no-way-in).
+[Test(Leaving)]
+void an_erased_account_cannot_sign_in_reset_or_be_reached() {
+  // A reset link mailed before the erasure — it must not work after it.
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
+  Assert.NotEqual("", token);
+  runas (Ada) { new AccountErasure { Account = User.Single(u => u.Email == "ada@desk.test") }; }
+  runas (AuthBootstrap) {
+    Assert.False(User.Any(u => u.Email == "ada@desk.test"));
+    var erased = User.Single(u => u.DisplayName == "" && u.Email.EndsWith("@erased.invalid"));
+    Assert.False(erased.IsActive);
+    Assert.Null(erased.PasswordHash);
+    Assert.False(RoleGrant.Any(g => g.Member == erased));
+    // …and nothing mailed to her is left in the outbox.
+    Assert.Equal(0, MailsTo("ada@desk.test", ""));
+  }
+  runas (AuthBootstrap) { Assert.Equal("", SignIn("ada@desk.test", "correct-horse-1").Ticket); }
+  runas (AuthBootstrap) { Assert.Throws(() => ResetPassword(token, "a-brand-new-one")); }
+}
+
+// The erasure is the run's to make: the same writes in a request are refused by the kit's own rules.
+[Test(Leaving)]
+void a_request_cannot_erase_an_account() {
+  runas (Ada) { Assert.Denied(() => EraseAccount(User.Single(u => u.Email == "ada@desk.test"))); }
+  runas (AuthBootstrap) { Assert.True(User.Any(u => u.Email == "ada@desk.test")); }
+}

@@ -1,0 +1,25 @@
+// The app's own erasure run — what a person's "erase my account" starts. It decides WHO may be erased (here: anybody,
+// by the desk's admins); the kit's `EraseAccount` decides what erasing an account means.
+using Osysharp.UserAccounts;
+using Osysharp.Workflow;
+
+public enum ErasureState { Erasing, Erased }
+
+entity AccountErasure {
+  [Required] User Account;
+  ErasureState State;
+  security { allow read, create when IsAuthenticated; }
+}
+
+workflow EraseOneAccount {
+  Tracks    = AccountErasure.State;
+  Autostart = true;
+  Initial   = Erasing;
+  state Erasing {
+    enter {
+      EraseAccount(this.Item.Account);
+      goto Erased;
+    }
+  }
+  terminal success Erased { }
+}

@@ -1,0 +1,85 @@
+// AN ACCOUNT'S SESSIONS ARE VALID FROM ITS LAST CHANGE.
+//
+// A password change or a reset ends every ticket the account already holds — on every browser, on every node — except
+// the one making the change (a reset made signed out has none to keep). Each ticket here is a REAL one, made by the
+// kit's own sign-in, and is used over HTTP (`Api.Get("/account", bearer: …)`, the account page, which needs a
+// signed-in person) before and after: so a refusal is the change, never a ticket that never worked.
+// SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change).
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void TwoAccounts() {
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+             EmailVerifiedAt = DateTime.UtcNow };
+  new User { Email = "lin@desk.test", DisplayName = "Lin", PasswordHash = Security.HashPassword("correct-horse-2"),
+             EmailVerifiedAt = DateTime.UtcNow };
+}
+
+/// A sign-in on a browser of its own: a fresh ticket.
+string SignedIn(string email, string password) {
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignIn(email, password).Ticket; }
+  return ticket;
+}
+
+[Test(TwoAccounts)]
+void a_password_change_signs_the_accounts_other_browsers_out_and_nobody_elses() {
+  var laptop = SignedIn("ada@desk.test", "correct-horse-1");
+  var phone = SignedIn("ada@desk.test", "correct-horse-1");
+  var lin = SignedIn("lin@desk.test", "correct-horse-2");
+  Assert.Equal(200, Api.Get("/account", bearer: laptop).StatusCode);
+  Assert.Equal(200, Api.Get("/account", bearer: phone).StatusCode);
+  Assert.Equal(200, Api.Get("/account", bearer: lin).StatusCode);
+
+  runas (AuthBootstrap) { ChangePassword("ada@desk.test", "correct-horse-1", "a-whole-new-one"); }
+
+  var refused = Api.Get("/account", bearer: phone);
+  Assert.Equal(401, refused.StatusCode);
+  Assert.Contains("password was changed or reset in another session", refused.Body);
+  Assert.Equal(401, Api.Get("/account", bearer: laptop).StatusCode);
+  // Another account is not touched, and signing in again with the new password is an ordinary working ticket.
+  Assert.Equal(200, Api.Get("/account", bearer: lin).StatusCode);
+  Assert.Equal(200, Api.Get("/account", bearer: SignedIn("ada@desk.test", "a-whole-new-one")).StatusCode);
+}
+
+[Test(TwoAccounts)]
+void a_reset_signs_every_browser_out_and_the_ticket_it_answers_works() {
+  var before = SignedIn("ada@desk.test", "correct-horse-1");
+  Assert.Equal(200, Api.Get("/account", bearer: before).StatusCode);
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
+  string fresh = "";
+  runas (AuthBootstrap) { fresh = ResetPassword(token, "a-whole-new-one"); }
+
+  Assert.Equal(401, Api.Get("/account", bearer: before).StatusCode);
+  Assert.Equal(200, Api.Get("/account", bearer: fresh).StatusCode);
+}
+
+[Test(TwoAccounts)]
+void moving_the_address_signs_the_accounts_other_browsers_out() {
+  // The address is where a password is reset to, so moving it changes the account's way in as a new password does.
+  var laptop = SignedIn("ada@desk.test", "correct-horse-1");
+  var lin = SignedIn("lin@desk.test", "correct-horse-2");
+  Assert.Equal(200, Api.Get("/account", bearer: laptop).StatusCode);
+  runas (AuthBootstrap) { ChangeEmail("ada@desk.test", "correct-horse-1", "ada.new@desk.test"); }
+  // Asked for, not yet moved: nothing ends until the new address proves itself.
+  Assert.Equal(200, Api.Get("/account", bearer: laptop).StatusCode);
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada.new@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { VerifyEmail(token); }
+
+  var refused = Api.Get("/account", bearer: laptop);
+  Assert.Equal(401, refused.StatusCode);
+  Assert.Equal(200, Api.Get("/account", bearer: lin).StatusCode);
+  Assert.Equal(200, Api.Get("/account", bearer: SignedIn("ada.new@desk.test", "correct-horse-1")).StatusCode);
+}
+
+[Test(TwoAccounts)]
+void a_change_refused_for_a_wrong_password_signs_nobody_out() {
+  var laptop = SignedIn("ada@desk.test", "correct-horse-1");
+  runas (AuthBootstrap) { Assert.Throws(() => ChangePassword("ada@desk.test", "a-guess", "a-whole-new-one")); }
+  Assert.Equal(200, Api.Get("/account", bearer: laptop).StatusCode);
+}

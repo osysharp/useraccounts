@@ -1,0 +1,1173 @@
+// ar (العربية): the words of Osysharp.UserAccounts, translated.
+// Written and kept in step with the source by `osy translate`: a new text arrives as `=> null`, a text
+// whose source changed keeps its old translation in a `was` clause. The words are yours to edit.
+// Source language: en.
+
+translations ar {
+  // ── AccountAddressChangeMail ──
+  /// AccountAddressChangeMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {newAddress} = newAddress (string)
+  /// shown through EmailLayout.preview
+  mailPreview "A request to sign in with {newAddress} instead." => "طلب لتسجيل الدخول باستخدام {newAddress} بدلًا من ذلك.";
+  /// AccountAddressChangeMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Your {AccountsAppName} address is changing" => "عنوانك في {AccountsAppName} يتغير";
+  /// AccountAddressChangeMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Your address is changing"
+  text "If this was not you, change your password now: whoever asked knows it." => "إن لم تكن أنت، فغيّر كلمة المرور الآن: من طلب ذلك يعرفها.";
+  /// AccountAddressChangeMail · text on the page
+  /// placeholders: {account.Email} = account.Email (string), {newAddress} = newAddress (string)
+  /// shown through EmailText.text
+  /// beside: "Your address is changing", "If this was not you, change your password now: whoever asked knows it."
+  text "Somebody signed in as {account.Email} asked to move the account to {newAddress}. It moves once that address confirms it." => "طلب شخص مسجّل الدخول باسم {account.Email} نقل الحساب إلى {newAddress}. سينتقل الحساب بمجرد تأكيد ذلك العنوان.";
+  /// AccountAddressChangeMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "If this was not you, change your password now: whoever asked knows it."
+  text "Your address is changing" => "عنوانك يتغير";
+
+  // ── AccountAddressChangedMail ──
+  /// AccountAddressChangedMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {newAddress} = newAddress (string)
+  /// shown through EmailLayout.preview
+  mailPreview "The account now signs in with {newAddress}." => "يسجّل الحساب الدخول الآن باستخدام {newAddress}.";
+  /// AccountAddressChangedMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Your {AccountsAppName} address was changed" => "تم تغيير عنوانك في {AccountsAppName}";
+  /// AccountAddressChangedMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {oldAddress} = oldAddress (string), {newAddress} = newAddress (string)
+  /// shown through EmailText.text
+  /// beside: "Your address was changed"
+  text "At your request, somebody at {AccountsAppName} moved the account for {oldAddress} to {newAddress}. It signs in with that address from now on, with the same password." => "بناءً على طلبك، نقل شخص في {AccountsAppName} الحساب من {oldAddress} إلى {newAddress}. سيسجّل الدخول بهذا العنوان من الآن فصاعدًا، بكلمة المرور نفسها.";
+  /// AccountAddressChangedMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through EmailNote.text
+  /// beside: "Your address was changed"
+  text "If you did not ask for this, tell {AccountsAppName} at once." => "إن لم تطلب ذلك، فأبلغ {AccountsAppName} فورًا.";
+  /// AccountAddressChangedMail · text on the page
+  /// shown through EmailHeading.text
+  text "Your address was changed" => "تم تغيير عنوانك";
+
+  // ── AccountAddressMovedHereMail ──
+  /// AccountAddressMovedHereMail · the preview line an inbox shows beside an email's subject
+  /// shown through EmailLayout.preview
+  mailPreview "Sign in with this address from now on." => "سجّل الدخول بهذا العنوان من الآن فصاعدًا.";
+  /// AccountAddressMovedHereMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Your {AccountsAppName} account now uses this address" => "يستخدم حسابك في {AccountsAppName} هذا العنوان الآن";
+  /// AccountAddressMovedHereMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Welcome to your account at this address"
+  text "Forgotten the password? Choose a new one from the sign-in page: the link comes here now." => "نسيت كلمة المرور؟ اختر واحدة جديدة من صفحة تسجيل الدخول: سيصل الرابط إلى هنا الآن.";
+  /// AccountAddressMovedHereMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "Forgotten the password? Choose a new one from the sign-in page: the link comes here now."
+  text "Welcome to your account at this address" => "مرحبًا بك في حسابك على هذا العنوان";
+  /// AccountAddressMovedHereMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {oldAddress} = oldAddress (string)
+  /// shown through EmailText.text
+  /// beside: "Welcome to your account at this address", "Forgotten the password? Choose a new one from the sign-in page: the link comes here now."
+  text "Your {AccountsAppName} account, which used {oldAddress}, now signs in with this address — with the same password. There is nothing you need to do." => "حسابك في {AccountsAppName}، الذي كان يستخدم {oldAddress}، يسجّل الدخول الآن بهذا العنوان — بكلمة المرور نفسها. لا يلزمك فعل شيء.";
+
+  // ── AccountExistsMail ──
+  /// AccountExistsMail · a button's label · at most ~13 characters
+  /// shown through EmailButton.label
+  /// beside: "You already have an account", "If this was not you, ignore this mail — your account has not changed."
+  /// also in SignInForm
+  button "Sign in" => "تسجيل الدخول";
+  /// AccountExistsMail · the preview line an inbox shows beside an email's subject
+  /// shown through EmailLayout.preview
+  mailPreview "Sign in, or choose a new password." => "سجّل الدخول، أو اختر كلمة مرور جديدة.";
+  /// AccountExistsMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "You already have an account with {AccountsAppName}" => "لديك حساب بالفعل في {AccountsAppName}";
+  /// AccountExistsMail · text on the page
+  /// placeholders: {resetLink} = resetLink (string)
+  /// shown through EmailText.text
+  /// beside: "You already have an account", "Sign in", "If this was not you, ignore this mail — your account has not changed."
+  text "Forgotten the password? Choose a new one: {resetLink}" => "نسيت كلمة المرور؟ اختر كلمة جديدة: {resetLink}";
+  /// AccountExistsMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "You already have an account", "Sign in"
+  text "If this was not you, ignore this mail — your account has not changed." => "إن لم تكن أنت، فتجاهل هذه الرسالة، فحسابك لم يتغير.";
+  /// AccountExistsMail · text on the page
+  /// placeholders: {address} = address (string)
+  /// shown through EmailText.text
+  /// beside: "You already have an account", "Sign in", "If this was not you, ignore this mail — your account has not changed."
+  text "Somebody — we hope you — tried to make a new account for {address}. There already is one, so nothing new was made." => "حاول أحدهم، ونأمل أن تكون أنت، إنشاء حساب جديد لـ {address}. يوجد حساب بالفعل، لذا لم يُنشأ أي حساب جديد.";
+  /// AccountExistsMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "Sign in", "If this was not you, ignore this mail — your account has not changed."
+  text "You already have an account" => "لديك حساب بالفعل";
+
+  // ── AccountPage (/account) ──
+  /// AccountPage · /account · a title
+  /// shown through [Title]
+  title "Your account" => "حسابك";
+
+  // ── AccountPasswordChangedMail ──
+  /// AccountPasswordChangedMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Your {AccountsAppName} password was changed" => "تم تغيير كلمة المرور في {AccountsAppName}";
+  /// AccountPasswordChangedMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Your password was changed"
+  text "If it was not you, choose a new password from the sign-in page at once — the link there comes to this address." => "إن لم تكن أنت، فاختر كلمة مرور جديدة من صفحة تسجيل الدخول فورًا، فالرابط هناك يصل إلى هذا العنوان.";
+  /// AccountPasswordChangedMail · text on the page
+  /// placeholders: {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  /// beside: "Your password was changed", "If it was not you, choose a new password from the sign-in page at once — the link there comes to this address."
+  text "The password for {account.Email} was just changed. If this was you, there is nothing to do." => "تم للتو تغيير كلمة المرور لـ {account.Email}. إن كنت أنت، فلا داعي لفعل أي شيء.";
+  /// AccountPasswordChangedMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "If it was not you, choose a new password from the sign-in page at once — the link there comes to this address."
+  text "Your password was changed" => "تم تغيير كلمة المرور";
+
+  // ── AccountPhoneMail ──
+  /// AccountPhoneMail · the preview line an inbox shows beside an email's subject
+  /// shown through EmailLayout.preview
+  /// also in AccountPasswordChangedMail
+  /// also in AccountProviderMail
+  mailPreview "If this was you, there is nothing to do." => "إن كنت أنت، فلا داعي لفعل أي شيء.";
+  /// AccountPhoneMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {MaskedPhone} = MaskedPhone(…) (string)
+  /// shown through EmailLayout.preview
+  mailPreview "{MaskedPhone} is now on your account." => "أصبح {MaskedPhone} مرتبطًا بحسابك.";
+  /// AccountPhoneMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "A phone number was added to your {AccountsAppName} account" => "أُضيف رقم هاتف إلى حسابك في {AccountsAppName}";
+  /// AccountPhoneMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "A phone number was removed from your {AccountsAppName} account" => "أُزيل رقم هاتف من حسابك في {AccountsAppName}";
+  /// AccountPhoneMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "If this was not you, choose a new password at once: whoever did it knows your password."
+  text "A phone number was added" => "أُضيف رقم هاتف";
+  /// AccountPhoneMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "If this was not you, choose a new password at once: whoever did it knows your password."
+  text "A phone number was removed" => "أُزيل رقم هاتف";
+  /// AccountPhoneMail · text on the page
+  /// shown through EmailNote.text
+  /// also in AccountProviderMail
+  text "If this was not you, choose a new password at once: whoever did it knows your password." => "إن لم تكن أنت، فاختر كلمة مرور جديدة فورًا: من فعل ذلك يعرف كلمة مرورك.";
+  /// AccountPhoneMail · text on the page
+  /// placeholders: {MaskedPhone} = MaskedPhone(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  /// beside: "If this was not you, choose a new password at once: whoever did it knows your password."
+  text "The number ending {MaskedPhone} is no longer on the account {account.Email}." => "لم يعد الرقم المنتهي بـ {MaskedPhone} مرتبطًا بالحساب {account.Email}.";
+  /// AccountPhoneMail · text on the page
+  /// placeholders: {MaskedPhone} = MaskedPhone(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  /// beside: "If this was not you, choose a new password at once: whoever did it knows your password."
+  text "The number ending {MaskedPhone} is now on the account {account.Email}." => "أصبح الرقم المنتهي بـ {MaskedPhone} مرتبطًا بالحساب {account.Email}.";
+
+  // ── AccountProviderMail ──
+  /// AccountProviderMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {provider} = provider (string)
+  /// shown through EmailLayout.preview
+  mailPreview "Continue with {provider} signs you in from now on." => "يتيح لك «المتابعة باستخدام {provider}» تسجيل الدخول من الآن فصاعدًا.";
+  /// AccountProviderMail · an email's subject line
+  /// placeholders: {provider} = provider (string), {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "{provider} no longer signs in to {AccountsAppName}" => "لم يعد {provider} يتيح تسجيل الدخول إلى {AccountsAppName}";
+  /// AccountProviderMail · an email's subject line
+  /// placeholders: {provider} = provider (string), {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "{provider} now signs in to {AccountsAppName}" => "أصبح {provider} يتيح تسجيل الدخول إلى {AccountsAppName}";
+  /// AccountProviderMail · text on the page
+  /// shown through EmailNote.text
+  text "If this was not you, unlink it from your account page and choose a new password at once." => "إن لم تكن أنت، فألغِ ربطه من صفحة حسابك واختر كلمة مرور جديدة فورًا.";
+  /// AccountProviderMail · text on the page
+  /// placeholders: {provider} = provider (string), {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  text "Your {provider} account no longer signs in to {AccountsAppName} as {account.Email}." => "لم يعد حسابك في {provider} يتيح تسجيل الدخول إلى {AccountsAppName} باسم {account.Email}.";
+  /// AccountProviderMail · text on the page
+  /// placeholders: {provider} = provider (string), {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  text "Your {provider} account now signs in to {AccountsAppName} as {account.Email}." => "أصبح حسابك في {provider} يتيح تسجيل الدخول إلى {AccountsAppName} باسم {account.Email}.";
+  /// AccountProviderMail · text on the page
+  /// placeholders: {provider} = provider (string)
+  /// shown through EmailHeading.text
+  text "{provider} is linked" => "تم ربط {provider}";
+  /// AccountProviderMail · text on the page
+  /// placeholders: {provider} = provider (string)
+  /// shown through EmailHeading.text
+  text "{provider} is unlinked" => "تم إلغاء ربط {provider}";
+
+  // ── AccountRecoveryCodeUsedMail ──
+  /// AccountRecoveryCodeUsedMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {left} = left (int) — {left} is a count: give one text per plural form
+  /// shown through EmailLayout.preview
+  mailPreview "{left} of your recovery codes are left." => { zero: "رموز الاسترداد المتبقية لديك: {left}.", one: "تبقّى لديك {left} رمز استرداد.", two: "تبقّى لديك {left} رمز استرداد.", few: "تبقّت لديك {left} رموز استرداد.", many: "تبقّى لديك {left} رمزَ استرداد.", other: "تبقّى لديك {left} رمز استرداد." };
+  /// AccountRecoveryCodeUsedMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "A recovery code was used for {AccountsAppName}" => "تم استخدام رمز استرداد في {AccountsAppName}";
+  /// AccountRecoveryCodeUsedMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "If this was not you, choose a new password and ask for new recovery codes from your account page at once."
+  text "A recovery code was used" => "تم استخدام رمز استرداد";
+  /// AccountRecoveryCodeUsedMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "A recovery code was used"
+  text "If this was not you, choose a new password and ask for new recovery codes from your account page at once." => "إن لم تكن أنت، فاختر كلمة مرور جديدة واطلب رموز استرداد جديدة من صفحة حسابك فورًا.";
+  /// AccountRecoveryCodeUsedMail · text on the page
+  /// placeholders: {account.Email} = account.Email (string), {left} = left (int) — {left} is a count: give one text per plural form
+  /// shown through EmailText.text
+  /// beside: "A recovery code was used", "If this was not you, choose a new password and ask for new recovery codes from your account page at once."
+  text "One of the recovery codes for {account.Email} was just used. Each works once; {left} are left." => { zero: "تم للتو استخدام أحد رموز الاسترداد لـ {account.Email}. كل رمز يعمل مرة واحدة؛ الرموز المتبقية: {left}.", one: "تم للتو استخدام أحد رموز الاسترداد لـ {account.Email}. كل رمز يعمل مرة واحدة؛ تبقّى {left} رمز.", two: "تم للتو استخدام أحد رموز الاسترداد لـ {account.Email}. كل رمز يعمل مرة واحدة؛ تبقّى {left} رمز.", few: "تم للتو استخدام أحد رموز الاسترداد لـ {account.Email}. كل رمز يعمل مرة واحدة؛ تبقّت {left} رموز.", many: "تم للتو استخدام أحد رموز الاسترداد لـ {account.Email}. كل رمز يعمل مرة واحدة؛ تبقّى {left} رمزًا.", other: "تم للتو استخدام أحد رموز الاسترداد لـ {account.Email}. كل رمز يعمل مرة واحدة؛ تبقّى {left} رمز." };
+
+  // ── AccountResetMail ──
+  /// AccountResetMail · a button's label · at most ~30 characters
+  /// shown through EmailButton.label
+  /// beside: "The link works once, for an hour. If you did not ask, ignore this mail: your password has not changed."
+  button "Choose a new password" => "اختر كلمة مرور جديدة";
+  /// AccountResetMail · the preview line an inbox shows beside an email's subject
+  /// shown through EmailLayout.preview
+  mailPreview "The link works once, for an hour." => "يعمل الرابط مرة واحدة، لمدة ساعة.";
+  /// AccountResetMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Choose a new password for {AccountsAppName}" => "اختر كلمة مرور جديدة لـ {AccountsAppName}";
+  /// AccountResetMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "The link works once, for an hour. If you did not ask, ignore this mail: your password has not changed."
+  text "Choose a new password" => "اختر كلمة مرور جديدة";
+  /// AccountResetMail · text on the page
+  /// placeholders: {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  /// beside: "Choose a new password", "Choose a new password", "The link works once, for an hour. If you did not ask, ignore this mail: your password has not changed."
+  text "Somebody — we hope you — asked to choose a new password for {account.Email}." => "طلب أحدهم، ونأمل أن تكون أنت، اختيار كلمة مرور جديدة لـ {account.Email}.";
+  /// AccountResetMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Choose a new password", "Choose a new password"
+  text "The link works once, for an hour. If you did not ask, ignore this mail: your password has not changed." => "يعمل الرابط مرة واحدة، لمدة ساعة. إن لم تطلب ذلك، فتجاهل هذه الرسالة: لم تتغير كلمة المرور.";
+
+  // ── AccountScreen ──
+  /// AccountScreen · a heading
+  /// shown through AccountsFrame.heading
+  heading "Your account" => "حسابك";
+  /// AccountScreen · text on the page
+  /// shown through AccountsFrame.sub
+  text "How you sign in." => "كيف تسجّل الدخول.";
+
+  // ── AccountSecondFactorMail ──
+  /// AccountSecondFactorMail · the preview line an inbox shows beside an email's subject
+  /// shown through EmailLayout.preview
+  mailPreview "Signing in now asks for a code from your app." => "يطلب تسجيل الدخول الآن رمزًا من تطبيقك.";
+  /// AccountSecondFactorMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Two-step sign-in is off for {AccountsAppName}" => "تم إيقاف تسجيل الدخول بخطوتين في {AccountsAppName}";
+  /// AccountSecondFactorMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Two-step sign-in is on for {AccountsAppName}" => "تم تفعيل تسجيل الدخول بخطوتين في {AccountsAppName}";
+  /// AccountSecondFactorMail · text on the page
+  /// shown through EmailNote.text
+  text "If this was not you, choose a new password at once and turn two-step sign-in back on: whoever did it knows your password and had a code." => "إن لم تكن أنت، فاختر كلمة مرور جديدة فورًا وأعد تفعيل تسجيل الدخول بخطوتين: من فعل ذلك يعرف كلمة مرورك وكان لديه رمز.";
+  /// AccountSecondFactorMail · text on the page
+  /// shown through EmailNote.text
+  text "Keep your recovery codes somewhere safe — each one signs you in once if you lose your phone." => "احتفظ برموز الاسترداد في مكان آمن، فكل رمز منها يتيح لك تسجيل الدخول مرة واحدة إن فقدت هاتفك.";
+  /// AccountSecondFactorMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  text "Signing in to {AccountsAppName} as {account.Email} now asks for a code from your authenticator app after the password." => "يطلب تسجيل الدخول إلى {AccountsAppName} باسم {account.Email} الآن، بعد كلمة المرور، رمزًا من تطبيق المصادقة.";
+  /// AccountSecondFactorMail · text on the page
+  /// shown through EmailHeading.text
+  text "Two-step sign-in is off" => "تسجيل الدخول بخطوتين متوقف";
+  /// AccountSecondFactorMail · text on the page
+  /// shown through EmailHeading.text
+  text "Two-step sign-in is on" => "تسجيل الدخول بخطوتين مفعّل";
+
+  // ── AccountSecondFactorResetMail ──
+  /// AccountSecondFactorResetMail · the preview line an inbox shows beside an email's subject
+  /// shown through EmailLayout.preview
+  mailPreview "Set it up again the next time you sign in." => "أعد إعداده في المرة القادمة التي تسجّل فيها الدخول.";
+  /// AccountSecondFactorResetMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Your two-step sign-in for {AccountsAppName} was reset" => "تمت إعادة تعيين تسجيل الدخول بخطوتين في {AccountsAppName}";
+  /// AccountSecondFactorResetMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Your two-step sign-in was reset", "Sign in with your password and set two-step sign-in up again from your account page — or, where it is required of you, the sign-in itself will ask."
+  text "If you did not ask for this, tell the person who runs the app at once, and choose a new password." => "إن لم تطلب ذلك، فأخبر المسؤول عن التطبيق فورًا، واختر كلمة مرور جديدة.";
+  /// AccountSecondFactorResetMail · text on the page
+  /// shown through EmailText.text
+  /// beside: "Your two-step sign-in was reset", "If you did not ask for this, tell the person who runs the app at once, and choose a new password."
+  text "Sign in with your password and set two-step sign-in up again from your account page — or, where it is required of you, the sign-in itself will ask." => "سجّل الدخول بكلمة المرور وأعد إعداد تسجيل الدخول بخطوتين من صفحة حسابك، أو سيطلب منك تسجيل الدخول ذلك إن كان مطلوبًا منك.";
+  /// AccountSecondFactorResetMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  /// beside: "Your two-step sign-in was reset", "Sign in with your password and set two-step sign-in up again from your account page — or, where it is required of you, the sign-in itself will ask.", "If you did not ask for this, tell the person who runs the app at once, and choose a new password."
+  text "Somebody who looks after {AccountsAppName}'s people reset two-step sign-in for {account.Email} — usually because a phone was lost. Your authenticator app and your recovery codes no longer sign you in, and you were signed out everywhere." => "أعاد أحد المسؤولين عن مستخدمي {AccountsAppName} تعيين تسجيل الدخول بخطوتين لـ {account.Email}، وعادةً ما يحدث ذلك بسبب فقدان الهاتف. لم يعد بإمكانك تسجيل الدخول بتطبيق المصادقة أو برموز الاسترداد، وتم تسجيل خروجك من كل الأجهزة.";
+  /// AccountSecondFactorResetMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "Sign in with your password and set two-step sign-in up again from your account page — or, where it is required of you, the sign-in itself will ask.", "If you did not ask for this, tell the person who runs the app at once, and choose a new password."
+  text "Your two-step sign-in was reset" => "تمت إعادة تعيين تسجيل الدخول بخطوتين";
+
+  // ── AccountSettings ──
+  /// AccountSettings · a button's label · at most ~20 characters
+  /// shown through Button.label
+  /// beside: "Current password", "New password", "Change password", "New address"
+  button "Change address" => "تغيير العنوان";
+  /// AccountSettings · a button's label · at most ~21 characters
+  /// shown through Button.label
+  /// beside: "Current password", "New password", "New address", "Change address"
+  button "Change password" => "تغيير كلمة المرور";
+  /// AccountSettings · a button's label · at most ~20 characters
+  /// shown through Button.label
+  /// beside: "Code from the text"
+  button "Confirm number" => "تأكيد الرقم";
+  /// AccountSettings · a button's label · at most ~14 characters
+  /// placeholders: {p} = p (string)
+  /// shown through Button.label
+  button "Link {p}" => "ربط {p}";
+  /// AccountSettings · a button's label · at most ~30 characters
+  /// shown through Button.label
+  /// beside: "New recovery codes"
+  button "Move to another phone" => "النقل إلى هاتف آخر";
+  /// AccountSettings · a button's label · at most ~26 characters
+  /// shown through Button.label
+  button "New recovery codes" => "رموز استرداد جديدة";
+  /// AccountSettings · a button's label · at most ~24 characters
+  /// shown through Button.label
+  button "Remove the number" => "إزالة الرقم";
+  /// AccountSettings · a button's label · at most ~33 characters
+  /// shown through Button.label
+  /// beside: "After your password, signing in asks for a code from an authenticator app on your phone — so a stolen password is not enough."
+  button "Set up two-step sign-in" => "إعداد تسجيل الدخول بخطوتين";
+  /// AccountSettings · a button's label · at most ~41 characters
+  /// shown through Button.label
+  /// beside: "Or have a code texted to this number each time you sign in. An authenticator app is stronger — a number can be moved to somebody else's SIM."
+  button "Text me a code when I sign in" => "أرسل لي رمزًا عند تسجيل الدخول";
+  /// AccountSettings · a button's label · at most ~30 characters
+  /// shown through Button.label
+  /// beside: "Code from the text"
+  button "Turn off texted codes" => "إيقاف الرموز النصية";
+  /// AccountSettings · a button's label · at most ~35 characters
+  /// shown through Button.label
+  /// beside: "New recovery codes"
+  button "Turn off two-step sign-in" => "إيقاف تسجيل الدخول بخطوتين";
+  /// AccountSettings · a button's label · at most ~12 characters
+  /// shown through Button.label
+  /// beside: "Linked"
+  button "Unlink" => "إلغاء الربط";
+  /// AccountSettings · a hint under a field
+  /// shown through Field.hint
+  /// beside: "New password", "Change password", "New address", "Change address"
+  hint "Needed for every change below." => "مطلوبة لكل تغيير أدناه.";
+  /// AccountSettings · a hint under a field
+  /// shown through Field.hint
+  hint "Needed too, with two-step sign-in on. A recovery code works as well." => "مطلوب أيضًا عند تفعيل تسجيل الدخول بخطوتين. ويصلح رمز الاسترداد كذلك.";
+  /// AccountSettings · a hint under a field
+  /// shown through Field.hint
+  /// beside: "Current password", "New password", "Change password", "Change address"
+  hint "Or your own address, to have a new confirmation link sent." => "أو عنوانك الحالي، ليُرسل إليك رابط تأكيد جديد.";
+  /// AccountSettings · a hint under a field
+  /// shown through Field.hint
+  /// beside: "Phone"
+  hint "With its country code. We text it a code to confirm it is yours." => "مع رمز البلد. سنرسل إليه رمزًا في رسالة نصية للتأكد من أنه رقمك.";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~26 characters
+  /// shown through Field.label
+  /// also in ProviderSignIn
+  label "Code from your app" => "الرمز من تطبيقك";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~15 characters
+  /// shown through Badge.label
+  label "Confirmed" => "مؤكَّد";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~23 characters
+  /// shown through Field.label
+  /// beside: "New password", "Change password", "New address", "Change address"
+  /// also in ProviderSignIn
+  label "Current password" => "كلمة المرور الحالية";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~12 characters
+  /// shown through Badge.label
+  /// beside: "Unlink"
+  label "Linked" => "مرتبط";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~17 characters
+  /// shown through Field.label
+  /// beside: "Current password", "New password", "Change password", "Change address"
+  label "New address" => "العنوان الجديد";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~16 characters
+  /// shown through Field.label
+  /// beside: "Phone"
+  label "New number" => "الرقم الجديد";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~19 characters
+  /// shown through Badge.label
+  label "Not confirmed" => "غير مؤكَّد";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~9 characters
+  /// shown through Badge.label
+  label "Off" => "متوقف";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~8 characters
+  /// shown through Badge.label
+  label "On" => "مفعّل";
+  /// AccountSettings · message
+  /// placeholders: {facts.AppName} = facts.AppName (string)
+  /// shown through Alert.message
+  message "{facts.AppName} asks for two-step sign-in on your account." => "يطلب {facts.AppName} تفعيل تسجيل الدخول بخطوتين على حسابك.";
+  /// AccountSettings · note
+  /// placeholders: {me.Email} = me.Email (string)
+  /// shown through note
+  note "A new link to confirm {me.Email} is on its way." => "رابط جديد لتأكيد {me.Email} في طريقه إليك.";
+  /// AccountSettings · note
+  /// shown through note
+  note "Signing in now asks for a code texted to your phone." => "يطلب تسجيل الدخول الآن رمزًا يُرسل إلى هاتفك في رسالة نصية.";
+  /// AccountSettings · note
+  /// shown through note
+  note "Texted sign-in codes are off." => "رموز تسجيل الدخول عبر الرسائل النصية متوقفة.";
+  /// AccountSettings · note
+  /// shown through note
+  note "Two-step sign-in is off." => "تسجيل الدخول بخطوتين متوقف.";
+  /// AccountSettings · note
+  /// placeholders: {newEmail} = newEmail (string)
+  /// shown through note
+  note "We have sent a link to {newEmail}. Your account moves to it when you open it." => "أرسلنا رابطًا إلى {newEmail}. سينتقل حسابك إليه عندما تفتحه.";
+  /// AccountSettings · note
+  /// placeholders: {phone.Number} = phone.Number (string)
+  /// shown through note
+  note "Your number {phone.Number} is confirmed." => "تم تأكيد رقمك {phone.Number}.";
+  /// AccountSettings · note
+  /// shown through note
+  note "Your password is changed." => "تم تغيير كلمة المرور.";
+  /// AccountSettings · note
+  /// shown through note
+  note "Your phone number is removed." => "تمت إزالة رقم هاتفك.";
+  /// AccountSettings · note
+  /// placeholders: {provider} = provider (string)
+  /// shown through note
+  note "{provider} no longer signs in to your account." => "لم يعد {provider} يتيح تسجيل الدخول إلى حسابك.";
+  /// AccountSettings · text on the page
+  /// beside: "Set up two-step sign-in"
+  text "After your password, signing in asks for a code from an authenticator app on your phone — so a stolen password is not enough." => "بعد كلمة المرور، يطلب تسجيل الدخول رمزًا من تطبيق مصادقة على هاتفك، فلا تكفي كلمة مرور مسروقة.";
+  /// AccountSettings · text on the page
+  /// beside: "Text me a code when I sign in"
+  text "Or have a code texted to this number each time you sign in. An authenticator app is stronger — a number can be moved to somebody else's SIM." => "أو استلم رمزًا على هذا الرقم في رسالة نصية في كل مرة تسجّل فيها الدخول. تطبيق المصادقة أقوى، فالرقم يمكن نقله إلى شريحة SIM لشخص آخر.";
+  /// AccountSettings · text on the page
+  text "Phone" => "الهاتف";
+  /// AccountSettings · text on the page
+  /// beside: "Unlinking asks for your current password. Signed up with a provider and have none? Choose one with a link from the sign-in page's "Forgot your password?"."
+  text "Sign in with" => "تسجيل الدخول باستخدام";
+  /// AccountSettings · text on the page
+  /// placeholders: {twoStep.RecoveryCodesLeft} = twoStep.RecoveryCodesLeft (int) — {twoStep.RecoveryCodesLeft} is a count: give one text per plural form
+  /// beside: "New recovery codes"
+  text "Signing in asks for a code from your app. {twoStep.RecoveryCodesLeft} recovery codes left." => { zero: "يطلب تسجيل الدخول رمزًا من تطبيقك. المتبقي من رموز الاسترداد: {twoStep.RecoveryCodesLeft}.", one: "يطلب تسجيل الدخول رمزًا من تطبيقك. المتبقي من رموز الاسترداد: {twoStep.RecoveryCodesLeft}.", two: "يطلب تسجيل الدخول رمزًا من تطبيقك. المتبقي من رموز الاسترداد: {twoStep.RecoveryCodesLeft}.", few: "يطلب تسجيل الدخول رمزًا من تطبيقك. المتبقي من رموز الاسترداد: {twoStep.RecoveryCodesLeft}.", many: "يطلب تسجيل الدخول رمزًا من تطبيقك. المتبقي من رموز الاسترداد: {twoStep.RecoveryCodesLeft}.", other: "يطلب تسجيل الدخول رمزًا من تطبيقك. المتبقي من رموز الاسترداد: {twoStep.RecoveryCodesLeft}." };
+  /// AccountSettings · text on the page
+  text "Signing in asks for a code texted to this number after your password." => "يطلب تسجيل الدخول، بعد كلمة المرور، رمزًا يُرسل إلى هذا الرقم في رسالة نصية.";
+  /// AccountSettings · text on the page
+  text "Two-step sign-in" => "تسجيل الدخول بخطوتين";
+  /// AccountSettings · text on the page
+  /// shown through problem
+  text "Type your current password first — setting up two-step sign-in asks for it." => "اكتب كلمة المرور الحالية أولًا، فإعداد تسجيل الدخول بخطوتين يتطلبها.";
+  /// AccountSettings · text on the page
+  /// beside: "Sign in with"
+  text "Unlinking asks for your current password. Signed up with a provider and have none? Choose one with a link from the sign-in page's \"Forgot your password?\"." => "يتطلب إلغاء الربط كلمة المرور الحالية. سجّلت عبر مزوّد وليست لديك كلمة مرور؟ اختر واحدة عبر رابط «نسيت كلمة المرور؟» في صفحة تسجيل الدخول.";
+
+  // ── AccountStepUpMail ──
+  /// AccountStepUpMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {code} = code (string)
+  /// shown through EmailLayout.preview
+  mailPreview "Your code is {code}." => "رمزك هو {code}.";
+  /// AccountStepUpMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Your code for {AccountsAppName}" => "رمزك لـ {AccountsAppName}";
+  /// AccountStepUpMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes — and consider changing your password."
+  text "Confirm it is you" => "أكّد أنك أنت";
+  /// AccountStepUpMail · text on the page
+  /// placeholders: {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  /// beside: "Confirm it is you", "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes — and consider changing your password."
+  text "Somebody signed in as {account.Email} asked to confirm it is them." => "طلب شخص مسجّل الدخول باسم {account.Email} تأكيد هويته.";
+  /// AccountStepUpMail · text on the page
+  /// placeholders: {account.Email} = account.Email (string), {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through EmailText.text
+  /// beside: "Confirm it is you", "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes — and consider changing your password."
+  text "Somebody signed in as {account.Email} is asking {AccountsAppName} about the personal data it holds. To make sure it is you, type the code below where you were asked for it." => "يسأل شخص مسجّل الدخول باسم {account.Email} {AccountsAppName} عن البيانات الشخصية التي يحتفظ بها. للتأكد من أنك أنت، اكتب الرمز أدناه حيث طُلب منك.";
+  /// AccountStepUpMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Confirm it is you"
+  text "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes — and consider changing your password." => "الرمز صالح لمدة خمس عشرة دقيقة. إن لم تطلب ذلك، فتجاهل هذه الرسالة، ولن يتغير شيء، وفكّر في تغيير كلمة المرور.";
+
+  // ── AccountTextedStepMail ──
+  /// AccountTextedStepMail · the preview line an inbox shows beside an email's subject
+  /// shown through EmailLayout.preview
+  mailPreview "Signing in now asks for a code texted to your phone." => "يطلب تسجيل الدخول الآن رمزًا يُرسل إلى هاتفك في رسالة نصية.";
+  /// AccountTextedStepMail · the preview line an inbox shows beside an email's subject
+  /// shown through EmailLayout.preview
+  /// also in AccountSecondFactorMail
+  mailPreview "Signing in now asks only for your password." => "يطلب تسجيل الدخول الآن كلمة المرور فقط.";
+  /// AccountTextedStepMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Sign-in codes by text are off for {AccountsAppName}" => "تم إيقاف رموز تسجيل الدخول عبر الرسائل النصية في {AccountsAppName}";
+  /// AccountTextedStepMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Sign-in codes by text are on for {AccountsAppName}" => "تم تفعيل رموز تسجيل الدخول عبر الرسائل النصية في {AccountsAppName}";
+  /// AccountTextedStepMail · text on the page
+  /// shown through EmailNote.text
+  text "For stronger protection, use an authenticator app instead — a phone number can be moved to somebody else's SIM." => "لحماية أقوى، استخدم تطبيق مصادقة بدلًا من ذلك، فرقم الهاتف يمكن نقله إلى شريحة SIM لشخص آخر.";
+  /// AccountTextedStepMail · text on the page
+  /// shown through EmailNote.text
+  text "If this was not you, choose a new password at once." => "إن لم تكن أنت، فاختر كلمة مرور جديدة فورًا.";
+  /// AccountTextedStepMail · text on the page
+  /// shown through EmailHeading.text
+  text "Sign-in codes by text are off" => "رموز تسجيل الدخول عبر الرسائل النصية متوقفة";
+  /// AccountTextedStepMail · text on the page
+  /// shown through EmailHeading.text
+  text "Sign-in codes by text are on" => "رموز تسجيل الدخول عبر الرسائل النصية مفعّلة";
+  /// AccountTextedStepMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  text "Signing in to {AccountsAppName} as {account.Email} now asks for a code texted to your phone after the password." => "يطلب تسجيل الدخول إلى {AccountsAppName} باسم {account.Email} الآن، بعد كلمة المرور، رمزًا يُرسل إلى هاتفك في رسالة نصية.";
+  /// AccountTextedStepMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  /// also in AccountSecondFactorMail
+  text "Signing in to {AccountsAppName} as {account.Email} now asks only for the password." => "يطلب تسجيل الدخول إلى {AccountsAppName} باسم {account.Email} الآن كلمة المرور فقط.";
+
+  // ── AccountVerifyMail ──
+  /// AccountVerifyMail · a button's label · at most ~26 characters
+  /// shown through EmailButton.label
+  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  button "Confirm my address" => "تأكيد عنواني";
+  /// AccountVerifyMail · a button's label · at most ~31 characters
+  /// shown through EmailButton.label
+  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  button "Confirm my new address" => "تأكيد عنواني الجديد";
+  /// AccountVerifyMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {code} = code (string)
+  /// shown through EmailLayout.preview
+  mailPreview "Your code is {code} — or one click and it is confirmed." => "رمزك هو {code}، أو انقر مرة واحدة ليتم التأكيد.";
+  /// AccountVerifyMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Confirm your address for {AccountsAppName}" => "أكّد عنوانك في {AccountsAppName}";
+  /// AccountVerifyMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Confirm your new address for {AccountsAppName}" => "أكّد عنوانك الجديد في {AccountsAppName}";
+  /// AccountVerifyMail · text on the page
+  /// placeholders: {address} = address (string), {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through EmailText.text
+  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  text "Confirm that {address} is yours, so {AccountsAppName} can reach you." => "أكّد أن {address} عنوانك، ليتمكن {AccountsAppName} من التواصل معك.";
+  /// AccountVerifyMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  text "Confirm your address" => "أكّد عنوانك";
+  /// AccountVerifyMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  text "Confirm your new address" => "أكّد عنوانك الجديد";
+  /// AccountVerifyMail · text on the page
+  /// shown through EmailNote.text
+  text "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes." => "الرمز صالح لمدة خمس عشرة دقيقة، والرابط لمدة ثلاثة أيام. إن لم تطلب ذلك، فتجاهل هذه الرسالة، ولن يتغير شيء.";
+  /// AccountVerifyMail · text on the page
+  /// placeholders: {code} = code (string)
+  /// shown through EmailText.text
+  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  /// also in AccountStepUpMail
+  text "Type this code where you were asked for it: {code}" => "اكتب هذا الرمز حيث طُلب منك: {code}";
+  /// AccountVerifyMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {address} = address (string)
+  /// shown through EmailText.text
+  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  text "You asked to sign in to {AccountsAppName} with {address} from now on. Confirm it is yours, and your account moves to it." => "طلبت تسجيل الدخول إلى {AccountsAppName} باستخدام {address} من الآن فصاعدًا. أكّد أنه عنوانك، وسينتقل حسابك إليه.";
+
+  // ── AccountsAppName ──
+  /// AccountsAppName · an image's description for screen readers
+  /// shown through AccountsAppName()
+  alt "your account" => "حسابك";
+
+  // ── AccountsQrCode ──
+  /// AccountsQrCode · a control's name for screen readers
+  accessibleName "QR code for your authenticator app" => "رمز QR لتطبيق المصادقة";
+
+  // ── AddressCodeStep ──
+  /// AddressCodeStep · a button's label · at most ~13 characters
+  /// shown through Button.label
+  /// beside: "Code from the mail"
+  button "Confirm" => "تأكيد";
+  /// AddressCodeStep · a button's label · at most ~21 characters
+  /// shown through Button.label
+  button "Send a new code" => "إرسال رمز جديد";
+  /// AddressCodeStep · a label (a field, a list item, a menu entry) · at most ~26 characters
+  /// shown through Field.label
+  /// beside: "Confirm"
+  label "Code from the mail" => "الرمز من البريد";
+  /// AddressCodeStep · message
+  /// placeholders: {address} = address (string)
+  /// shown through Alert.message
+  /// beside: "Code from the mail", "Confirm"
+  message "Check your mail at {address}. It says what comes next — a six-digit code to type here, or a link to open." => "تحقق من بريدك على {address}. ستجد فيه الخطوة التالية: رمزًا من ستة أرقام تكتبه هنا، أو رابطًا تفتحه.";
+  /// AddressCodeStep · text on the page
+  text "If a new code was due, it is on its way." => "إن كان موعد رمز جديد قد حان، فهو في طريقه إليك.";
+
+  // ── ChangeAddressFor ──
+  /// ChangeAddressFor · an error message
+  /// shown through ValidationException
+  /// also in ChangeEmail
+  error "Another account already uses that address." => "هذا العنوان مستخدم بالفعل في حساب آخر.";
+  /// ChangeAddressFor · an error message
+  /// shown through ValidationException
+  error "Say why the address is changed — how you know it is their account." => "اذكر سبب تغيير العنوان — وكيف تعرف أنه حسابهم.";
+  /// ChangeAddressFor · an error message
+  /// shown through ValidationException
+  /// also in SignUp
+  /// also in ChangeEmail
+  error "That does not look like an email address." => "لا يبدو هذا عنوان بريد إلكتروني.";
+  /// ChangeAddressFor · an error message
+  /// shown through ValidationException
+  error "That is already the account's address." => "هذا هو عنوان الحساب بالفعل.";
+
+  // ── Claim ──
+  /// Claim · an error message
+  /// shown through ValidationException
+  error "That is not the password this account was made with. Type it again — or, if you did not make this account or do not know its password, choose a new one." => "هذه ليست كلمة المرور التي أُنشئ بها هذا الحساب. اكتبها مجددًا، أو اختر كلمة مرور جديدة إن لم تكن أنت من أنشأ هذا الحساب أو كنت لا تعرف كلمة مروره.";
+  /// Claim · an error message
+  /// shown through ValidationException
+  /// also in Prove
+  error "That link is for an address this account no longer uses." => "هذا الرابط لعنوان لم يعد هذا الحساب يستخدمه.";
+
+  // ── ConfirmAddressChange ──
+  /// ConfirmAddressChange · an error message
+  /// shown through ValidationException
+  error "Another account has taken that address since you asked. Choose another." => "استخدم حساب آخر هذا العنوان منذ أن طلبته. اختر عنوانًا آخر.";
+  /// ConfirmAddressChange · an error message
+  /// shown through ValidationException
+  error "That link proves an address; it does not move the account." => "يُثبت هذا الرابط عنوانًا؛ ولا ينقل الحساب.";
+
+  // ── ConfirmPasswordStep ──
+  /// ConfirmPasswordStep · a button's label · at most ~27 characters
+  /// shown through Button.label
+  /// beside: "Your password", "I did not make this account, or forgot its password"
+  button "Confirm and sign in" => "تأكيد وتسجيل الدخول";
+  /// ConfirmPasswordStep · a button's label · at most ~72 characters
+  /// shown through Button.label
+  /// beside: "Your password", "Confirm and sign in"
+  button "I did not make this account, or forgot its password" => "لم أُنشئ هذا الحساب، أو نسيت كلمة مروره";
+  /// ConfirmPasswordStep · a label (a field, a list item, a menu entry) · at most ~19 characters
+  /// shown through Field.label
+  /// beside: "Confirm and sign in", "I did not make this account, or forgot its password"
+  label "Your password" => "كلمة مرورك";
+  /// ConfirmPasswordStep · text on the page
+  /// placeholders: {address} = address (string)
+  /// beside: "New password", "The same again", "Save and sign in"
+  text "Choose a password for {address}. The account becomes yours: any password, two-step sign-in, phone or other sign-in set up on it before is removed." => "اختر كلمة مرور لـ {address}. سيصبح الحساب لك: ستُزال أي كلمة مرور أو تسجيل دخول بخطوتين أو هاتف أو وسيلة تسجيل دخول أخرى أُعدّت عليه من قبل.";
+  /// ConfirmPasswordStep · text on the page
+  /// placeholders: {address} = address (string)
+  /// beside: "Your password", "Confirm and sign in", "I did not make this account, or forgot its password"
+  text "{address} receives mail, and the account for it was made before that was confirmed. If you made it, type the password you chose." => "يستقبل {address} البريد، وقد أُنشئ الحساب الخاص به قبل تأكيد ذلك. إن كنت أنت من أنشأه، فاكتب كلمة المرور التي اخترتها.";
+
+  // ── EnableSecondFactor ──
+  /// EnableSecondFactor · an error message
+  /// shown through ValidationException
+  error "That code does not match — type the newest code your app shows, and check your phone's clock is set automatically." => "هذا الرمز غير مطابق. اكتب أحدث رمز يعرضه تطبيقك، وتأكد من أن ساعة هاتفك مضبوطة تلقائيًا.";
+  /// EnableSecondFactor · an error message
+  /// shown through ValidationException
+  error "That key is not one this page made — start setting it up again." => "هذا المفتاح لم تُنشئه هذه الصفحة، ابدأ الإعداد من جديد.";
+  /// EnableSecondFactor · an error message
+  /// shown through ValidationException
+  error "Two-step sign-in is already on. To move it to another phone, turn it off first — that asks for a code." => "تسجيل الدخول بخطوتين مفعّل بالفعل. لنقله إلى هاتف آخر، أوقفه أولًا، وسيُطلب منك رمز لذلك.";
+
+  // ── Enrolling ──
+  /// Enrolling · an error message
+  /// shown through ValidationException
+  error "That sign-in has expired — start again from the sign-in page." => "انتهت صلاحية تسجيل الدخول هذا، ابدأ من جديد من صفحة تسجيل الدخول.";
+
+  // ── ForgotPasswordForm ──
+  /// ForgotPasswordForm · a button's label · at most ~21 characters
+  /// shown through Button.label
+  /// beside: "Email"
+  button "Email me a link" => "أرسل لي رابطًا";
+  /// ForgotPasswordForm · a link · at most ~21 characters
+  /// shown through TextLink.label
+  /// also in ProviderSignIn
+  link "Back to sign in" => "العودة لتسجيل الدخول";
+  /// ForgotPasswordForm · message
+  /// placeholders: {email} = email (string)
+  /// shown through Alert.message
+  message "If there is an account for {email}, a link to choose a new password is on its way. It works once, for an hour." => "إن كان هناك حساب لـ {email}، فرابط اختيار كلمة مرور جديدة في طريقه إليك. يعمل مرة واحدة، لمدة ساعة.";
+
+  // ── ForgotPasswordPage (/forgot-password) ──
+  /// ForgotPasswordPage · /forgot-password · a title
+  /// shown through [Title]
+  title "Forgot your password" => "نسيت كلمة المرور";
+
+  // ── ForgotPasswordScreen ──
+  /// ForgotPasswordScreen · a heading
+  /// shown through AccountsFrame.heading
+  heading "Forgot your password?" => "نسيت كلمة المرور؟";
+  /// ForgotPasswordScreen · text on the page
+  /// shown through AccountsFrame.sub
+  text "We will mail you a link to choose a new one." => "سنرسل إليك رابطًا عبر البريد لاختيار كلمة مرور جديدة.";
+
+  // ── LinkProvider ──
+  /// LinkProvider · an error message
+  /// placeholders: {provider} = provider (string)
+  /// shown through ValidationException
+  error "A {provider} account already signs in to this one — unlink it first." => "يوجد حساب {provider} مرتبط بهذا الحساب بالفعل، ألغِ ربطه أولًا.";
+  /// LinkProvider · an error message
+  /// shown through ValidationException
+  error "That sign-in could not be verified, or the provider has not confirmed your address — start again." => "تعذّر التحقق من تسجيل الدخول هذا، أو أن المزوّد لم يؤكد عنوانك. ابدأ من جديد.";
+  /// LinkProvider · an error message
+  /// placeholders: {provider} = provider (string)
+  /// shown through ValidationException
+  error "That {provider} account already signs in to another account here." => "حساب {provider} هذا يُستخدم بالفعل لتسجيل الدخول إلى حساب آخر هنا.";
+
+  // ── NewRecoveryCodes ──
+  /// NewRecoveryCodes · an error message
+  /// shown through ValidationException
+  error "Turn two-step sign-in on first." => "فعّل تسجيل الدخول بخطوتين أولًا.";
+
+  // ── Osysharp.UserAccounts.AddressChangeState ──
+  /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~11 characters
+  /// shown through Osysharp.UserAccounts.AddressChangeState.Moved
+  /// beside: "Moving the account"
+  label "Moved" => "تم النقل";
+  /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~26 characters
+  /// shown through Osysharp.UserAccounts.AddressChangeState.Moving
+  /// beside: "Moved"
+  label "Moving the account" => "جارٍ نقل الحساب";
+
+  // ── Osysharp.UserAccounts.CodeChannel ──
+  /// Osysharp.UserAccounts.CodeChannel · a label (a field, a list item, a menu entry) · at most ~11 characters
+  /// shown through Osysharp.UserAccounts.CodeChannel.Email
+  /// beside: "Sms"
+  /// also in SignInForm
+  /// also in SignUpForm
+  /// also in ForgotPasswordForm
+  label "Email" => "البريد الإلكتروني";
+  /// Osysharp.UserAccounts.CodeChannel · a label (a field, a list item, a menu entry) · at most ~9 characters
+  /// shown through Osysharp.UserAccounts.CodeChannel.Sms
+  /// beside: "Email"
+  label "Sms" => "رسالة نصية";
+
+  // ── Osysharp.UserAccounts.RoleToldState ──
+  /// Osysharp.UserAccounts.RoleToldState · a label (a field, a list item, a menu entry) · at most ~13 characters
+  /// shown through Osysharp.UserAccounts.RoleToldState.Telling
+  /// beside: "Told"
+  label "Telling" => "جارٍ الإبلاغ";
+  /// Osysharp.UserAccounts.RoleToldState · a label (a field, a list item, a menu entry) · at most ~10 characters
+  /// shown through Osysharp.UserAccounts.RoleToldState.Told
+  /// beside: "Telling"
+  label "Told" => "تم الإبلاغ";
+
+  // ── Osysharp.UserAccounts.StepUpState ──
+  /// Osysharp.UserAccounts.StepUpState · a label (a field, a list item, a menu entry) · at most ~24 characters
+  /// shown through Osysharp.UserAccounts.StepUpState.Checked
+  /// beside: "Sending the code", "Waiting for the code", "Proven", "Not proven"
+  label "Checking the code" => "جارٍ التحقق من الرمز";
+  /// Osysharp.UserAccounts.StepUpState · a label (a field, a list item, a menu entry) · at most ~16 characters
+  /// shown through Osysharp.UserAccounts.StepUpState.Lapsed
+  /// beside: "Sending the code", "Waiting for the code", "Checking the code", "Proven"
+  label "Not proven" => "لم يتم التحقق";
+  /// Osysharp.UserAccounts.StepUpState · a label (a field, a list item, a menu entry) · at most ~12 characters
+  /// shown through Osysharp.UserAccounts.StepUpState.Proven
+  /// beside: "Sending the code", "Waiting for the code", "Checking the code", "Not proven"
+  label "Proven" => "تم التحقق";
+  /// Osysharp.UserAccounts.StepUpState · a label (a field, a list item, a menu entry) · at most ~23 characters
+  /// shown through Osysharp.UserAccounts.StepUpState.Sending
+  /// beside: "Waiting for the code", "Checking the code", "Proven", "Not proven"
+  label "Sending the code" => "جارٍ إرسال الرمز";
+  /// Osysharp.UserAccounts.StepUpState · a label (a field, a list item, a menu entry) · at most ~28 characters
+  /// shown through Osysharp.UserAccounts.StepUpState.Waiting
+  /// beside: "Sending the code", "Checking the code", "Proven", "Not proven"
+  label "Waiting for the code" => "بانتظار الرمز";
+
+  // ── ProvePhone ──
+  /// ProvePhone · an error message
+  /// shown through ValidationException
+  error "Another account already uses that number." => "هذا الرقم مستخدم بالفعل في حساب آخر.";
+  /// ProvePhone · an error message
+  /// shown through ValidationException
+  error "Turn off text-message sign-in codes first — this number is your second step." => "أوقف رموز تسجيل الدخول عبر الرسائل النصية أولًا، فهذا الرقم هو خطوتك الثانية.";
+  /// ProvePhone · an error message
+  /// shown through ValidationException
+  error "Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67." => "اكتب الرقم مع علامة + ورمز البلد، مثل +46 70 123 45 67، وليس 070 123 45 67.";
+  /// ProvePhone · an error message
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through ValidationException
+  error "{AccountsAppName} does not keep phone numbers." => "لا يحتفظ {AccountsAppName} بأرقام الهواتف.";
+
+  // ── ProviderSignIn ──
+  /// ProviderSignIn · a button's label · at most ~27 characters
+  /// placeholders: {who.Provider} = who.Provider (string)
+  /// shown through Button.label
+  /// beside: "Current password", "Code from your app", "Back to your account"
+  button "Link {who.Provider}" => "ربط {who.Provider}";
+  /// ProviderSignIn · a hint under a field
+  /// shown through Field.hint
+  /// beside: "Current password", "Back to your account"
+  hint "Only when two-step sign-in is on — a recovery code works as well." => "فقط عند تفعيل تسجيل الدخول بخطوتين، ويصلح رمز الاسترداد كذلك.";
+  /// ProviderSignIn · a link · at most ~28 characters
+  /// shown through TextLink.label
+  link "Back to your account" => "العودة إلى حسابك";
+  /// ProviderSignIn · message
+  /// placeholders: {step.Account} = step.Account (string), {facts.AppName} = facts.AppName (string)
+  /// shown through Alert.message
+  /// beside: "Back to sign in"
+  message "There is no account for {step.Account} here, and {facts.AppName} is not open for sign-up. Ask the person who runs it for an account." => "لا يوجد حساب لـ {step.Account} هنا، والتسجيل غير متاح في {facts.AppName}. اطلب حسابًا من المسؤول عنه.";
+  /// ProviderSignIn · message
+  /// placeholders: {who.Provider} = who.Provider (string)
+  /// shown through Alert.message
+  /// beside: "Back to your account"
+  message "{who.Provider} now signs in to your account." => "أصبح {who.Provider} يتيح تسجيل الدخول إلى حسابك.";
+  /// ProviderSignIn · text on the page
+  /// placeholders: {who.Provider} = who.Provider (string), {who.Email} = who.Email (string), {me.Email} = me.Email (string)
+  /// beside: "Current password", "Code from your app", "Back to your account"
+  text "Link the {who.Provider} account {who.Email} to your account, {me.Email}, so it signs you in from now on." => "اربط حساب {who.Provider} {who.Email} بحسابك، {me.Email}، ليتيح لك تسجيل الدخول من الآن فصاعدًا.";
+  /// ProviderSignIn · text on the page
+  text "Signing you in…" => "جارٍ تسجيل دخولك…";
+  /// ProviderSignIn · text on the page
+  /// shown through problem
+  text "That sign-in did not match an account that may sign in here." => "تسجيل الدخول هذا لا يطابق حسابًا مسموحًا له بتسجيل الدخول هنا.";
+
+  // ── ProviderSignInPage (/oauth/sign-in) ──
+  /// ProviderSignInPage · /oauth/sign-in · a title
+  /// shown through [Title]
+  title "Signing in" => "جارٍ تسجيل الدخول";
+
+  // ── ProviderSignInScreen ──
+  /// ProviderSignInScreen · a heading
+  /// shown through AccountsFrame.heading
+  heading "Signing in" => "جارٍ تسجيل الدخول";
+
+  // ── RecoveryCodeList ──
+  /// RecoveryCodeList · text on the page
+  /// beside: "Your recovery codes"
+  text "If you lose your phone, each of these signs you in once. Save them somewhere safe — a password manager, or on paper. This is the only time they are shown." => "إن فقدت هاتفك، فكل رمز من هذه الرموز يتيح لك تسجيل الدخول مرة واحدة. احفظها في مكان آمن، مثل مدير كلمات المرور أو على ورق. هذه هي المرة الوحيدة التي تُعرض فيها.";
+  /// RecoveryCodeList · text on the page
+  /// beside: "If you lose your phone, each of these signs you in once. Save them somewhere safe — a password manager, or on paper. This is the only time they are shown."
+  text "Your recovery codes" => "رموز الاسترداد الخاصة بك";
+
+  // ── RefuseWhenLockedOut ──
+  /// RefuseWhenLockedOut · an error message
+  /// shown through ValidationException
+  error "Too many wrong codes — wait fifteen minutes, then try again." => "رموز خاطئة كثيرة جدًا. انتظر خمس عشرة دقيقة، ثم حاول مجددًا.";
+
+  // ── RequireCode ──
+  /// RequireCode · an error message
+  /// shown through ValidationException
+  error "That code is not right — type the newest code your app shows, or a recovery code." => "هذا الرمز غير صحيح. اكتب أحدث رمز يعرضه تطبيقك، أو رمز استرداد.";
+
+  // ── ResetPassword ──
+  /// ResetPassword · an error message
+  /// shown through ValidationException
+  error "That link has expired or was already used — ask for a new one." => "انتهت صلاحية هذا الرابط أو سبق استخدامه. اطلب رابطًا جديدًا.";
+
+  // ── ResetPasswordForm ──
+  /// ResetPasswordForm · a button's label · at most ~23 characters
+  /// shown through Button.label
+  /// beside: "New password", "The same again", "Ask for a new link"
+  /// also in ConfirmPasswordStep
+  button "Save and sign in" => "حفظ وتسجيل الدخول";
+  /// ResetPasswordForm · a label (a field, a list item, a menu entry) · at most ~18 characters
+  /// shown through Field.label
+  /// beside: "The same again", "Save and sign in", "Ask for a new link"
+  /// also in ConfirmPasswordStep
+  /// also in AccountSettings
+  label "New password" => "كلمة المرور الجديدة";
+  /// ResetPasswordForm · a label (a field, a list item, a menu entry) · at most ~20 characters
+  /// shown through Field.label
+  /// beside: "New password", "Save and sign in", "Ask for a new link"
+  /// also in ConfirmPasswordStep
+  label "The same again" => "أعد كتابتها";
+  /// ResetPasswordForm · a link · at most ~26 characters
+  /// shown through TextLink.label
+  /// beside: "New password", "The same again", "Save and sign in"
+  link "Ask for a new link" => "اطلب رابطًا جديدًا";
+  /// ResetPasswordForm · a link · at most ~13 characters
+  /// shown through TextLink.label
+  /// beside: "Your password is changed. Sign in with it now — two-step sign-in comes next."
+  /// also in VerifyEmailResult
+  link "Sign in" => "تسجيل الدخول";
+  /// ResetPasswordForm · message
+  /// shown through Alert.message
+  /// beside: "Sign in"
+  message "Your password is changed. Sign in with it now — two-step sign-in comes next." => "تم تغيير كلمة المرور. سجّل الدخول بها الآن، ثم يأتي تسجيل الدخول بخطوتين.";
+  /// ResetPasswordForm · text on the page
+  /// shown through problem
+  /// also in ConfirmPasswordStep
+  text "The two passwords are not the same." => "كلمتا المرور غير متطابقتين.";
+
+  // ── ResetPasswordPage (/reset-password/{token}) ──
+  /// ResetPasswordPage · /reset-password/{token} · a title
+  /// shown through [Title]
+  title "Choose a new password" => "اختر كلمة مرور جديدة";
+
+  // ── ResetPasswordScreen ──
+  /// ResetPasswordScreen · a heading
+  /// shown through AccountsFrame.heading
+  heading "Choose a new password" => "اختر كلمة مرور جديدة";
+
+  // ── SecondFactorCodeStep ──
+  /// SecondFactorCodeStep · a link · at most ~17 characters
+  /// shown through TextLink.label
+  link "Start again" => "البدء من جديد";
+
+  // ── SecondFactorEnrolment ──
+  /// SecondFactorEnrolment · a button's label · at most ~40 characters
+  /// shown through Button.label
+  /// beside: "Two-step sign-in is on."
+  button "I have saved them — continue" => "حفظتها، متابعة";
+  /// SecondFactorEnrolment · a button's label · at most ~34 characters
+  /// shown through Button.label
+  /// beside: "1. Scan this with an authenticator app — Google Authenticator, Microsoft Authenticator, 1Password, or any other.", "Or type this key into the app:", "2. Type the six-digit code the app now shows.", "Code from the app"
+  button "Turn on two-step sign-in" => "تفعيل تسجيل الدخول بخطوتين";
+  /// SecondFactorEnrolment · a label (a field, a list item, a menu entry) · at most ~24 characters
+  /// shown through Field.label
+  /// beside: "1. Scan this with an authenticator app — Google Authenticator, Microsoft Authenticator, 1Password, or any other.", "Or type this key into the app:", "2. Type the six-digit code the app now shows.", "Turn on two-step sign-in"
+  label "Code from the app" => "الرمز من التطبيق";
+  /// SecondFactorEnrolment · message
+  /// shown through Alert.message
+  /// beside: "I have saved them — continue"
+  message "Two-step sign-in is on." => "تسجيل الدخول بخطوتين مفعّل.";
+  /// SecondFactorEnrolment · text on the page
+  /// beside: "Or type this key into the app:", "2. Type the six-digit code the app now shows.", "Code from the app", "Turn on two-step sign-in"
+  text "1. Scan this with an authenticator app — Google Authenticator, Microsoft Authenticator, 1Password, or any other." => "1. امسح هذا الرمز بتطبيق مصادقة، مثل Google Authenticator أو Microsoft Authenticator أو 1Password أو أي تطبيق آخر.";
+  /// SecondFactorEnrolment · text on the page
+  /// beside: "1. Scan this with an authenticator app — Google Authenticator, Microsoft Authenticator, 1Password, or any other.", "Or type this key into the app:", "Code from the app", "Turn on two-step sign-in"
+  text "2. Type the six-digit code the app now shows." => "2. اكتب الرمز المكوّن من ستة أرقام الذي يعرضه التطبيق الآن.";
+  /// SecondFactorEnrolment · text on the page
+  /// beside: "0.04em"
+  text "Or type this key into the app:" => "أو اكتب هذا المفتاح في التطبيق:";
+
+  // ── SetSmsSecondStep ──
+  /// SetSmsSecondStep · an error message
+  /// shown through ValidationException
+  error "Add and confirm a phone number first." => "أضف رقم هاتف وأكّده أولًا.";
+  /// SetSmsSecondStep · an error message
+  /// shown through ValidationException
+  error "Two-step sign-in with an authenticator app is on — that is already a stronger second step." => "تسجيل الدخول بخطوتين عبر تطبيق المصادقة مفعّل، وهو بالفعل خطوة ثانية أقوى.";
+  /// SetSmsSecondStep · an error message
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through ValidationException
+  error "{AccountsAppName} does not offer text-message sign-in codes." => "لا يوفّر {AccountsAppName} رموز تسجيل الدخول عبر الرسائل النصية.";
+
+  // ── SignInForm ──
+  /// SignInForm · a button's label · at most ~21 characters
+  /// shown through Button.label
+  button "Back to sign in" => "العودة لتسجيل الدخول";
+  /// SignInForm · a button's label · at most ~14 characters
+  /// shown through Button.label
+  /// beside: "Start again"
+  /// also in SecondFactorCodeStep
+  button "Continue" => "متابعة";
+  /// SignInForm · a button's label · at most ~24 characters
+  /// placeholders: {p} = p (string)
+  /// shown through Button.label
+  button "Continue with {p}" => "المتابعة باستخدام {p}";
+  /// SignInForm · a button's label · at most ~44 characters
+  /// shown through Button.label
+  /// beside: "Phone number"
+  button "Sign in with a password instead" => "تسجيل الدخول بكلمة المرور بدلًا من ذلك";
+  /// SignInForm · a button's label · at most ~38 characters
+  /// shown through Button.label
+  button "Sign in with a text message" => "تسجيل الدخول برسالة نصية";
+  /// SignInForm · a button's label · at most ~17 characters
+  /// shown through Button.label
+  /// beside: "Continue"
+  button "Start again" => "البدء من جديد";
+  /// SignInForm · a button's label · at most ~20 characters
+  /// shown through Button.label
+  /// also in AccountSettings
+  button "Text me a code" => "أرسل لي رمزًا";
+  /// SignInForm · a hint under a field
+  /// shown through Field.hint
+  /// beside: "Open your authenticator app and type the six-digit code it shows for this account."
+  /// also in SecondFactorCodeStep
+  hint "Lost your phone? Type one of your recovery codes instead." => "فقدت هاتفك؟ اكتب أحد رموز الاسترداد بدلًا من ذلك.";
+  /// SignInForm · a hint under a field
+  /// shown through Field.hint
+  /// beside: "Sign in with a password instead"
+  hint "The number on your account, with its country code." => "الرقم المرتبط بحسابك، مع رمز البلد.";
+  /// SignInForm · a label (a field, a list item, a menu entry) · at most ~10 characters
+  /// shown through Field.label
+  /// also in SecondFactorCodeStep
+  label "Code" => "الرمز";
+  /// SignInForm · a label (a field, a list item, a menu entry) · at most ~26 characters
+  /// shown through Field.label
+  /// beside: "If that number may sign in here, a six-digit code is on its way. It works for fifteen minutes."
+  /// also in AccountSettings
+  label "Code from the text" => "الرمز من الرسالة النصية";
+  /// SignInForm · a label (a field, a list item, a menu entry) · at most ~14 characters
+  /// shown through Field.label
+  /// beside: "Email", "Sign in", "Forgot your password?"
+  /// also in SignUpForm
+  label "Password" => "كلمة المرور";
+  /// SignInForm · a label (a field, a list item, a menu entry) · at most ~18 characters
+  /// shown through Field.label
+  /// beside: "Sign in with a password instead"
+  /// also in AccountSettings
+  label "Phone number" => "رقم الهاتف";
+  /// SignInForm · a link · at most ~24 characters
+  /// shown through TextLink.label
+  link "Create an account" => "إنشاء حساب";
+  /// SignInForm · a link · at most ~30 characters
+  /// shown through TextLink.label
+  link "Forgot your password?" => "نسيت كلمة المرور؟";
+  /// SignInForm · message
+  /// placeholders: {facts.AppName} = facts.AppName (string)
+  /// shown through Alert.message
+  /// beside: "Back to sign in"
+  /// also in ProviderSignIn
+  message "{facts.AppName} asks for two-step sign-in on your account. Set it up now — it takes a minute." => "يطلب {facts.AppName} تفعيل تسجيل الدخول بخطوتين على حسابك. أعدّه الآن، فالأمر يستغرق دقيقة.";
+  /// SignInForm · placeholder text inside an empty field · at most ~21 characters
+  /// shown through Field.placeholder
+  /// beside: "Password", "Sign in", "Forgot your password?"
+  /// also in SignUpForm
+  /// also in ForgotPasswordForm
+  placeholder "you@example.com" => "you@example.com";
+  /// SignInForm · text on the page
+  /// beside: "Code from the text"
+  text "If that number may sign in here, a six-digit code is on its way. It works for fifteen minutes." => "إن كان هذا الرقم مسموحًا له بتسجيل الدخول هنا، فرمز من ستة أرقام في طريقه إليك. صالح لمدة خمس عشرة دقيقة.";
+  /// SignInForm · text on the page
+  /// beside: "Code"
+  /// also in SecondFactorCodeStep
+  text "Open your authenticator app and type the six-digit code it shows for this account." => "افتح تطبيق المصادقة واكتب الرمز المكوّن من ستة أرقام الذي يعرضه لهذا الحساب.";
+  /// SignInForm · text on the page
+  /// shown through problem
+  text "That address and password do not match an account." => "هذا العنوان وكلمة المرور لا يطابقان أي حساب.";
+  /// SignInForm · text on the page
+  /// shown through problem
+  /// also in SecondFactorCodeStep
+  text "That code is not right — type the newest one your app shows." => "هذا الرمز غير صحيح. اكتب أحدث رمز يعرضه تطبيقك.";
+  /// SignInForm · text on the page
+  /// placeholders: {texted} = texted (string)
+  /// beside: "Code"
+  text "We have texted a six-digit code to your phone ({texted}). Type it here — it works for fifteen minutes." => "أرسلنا رمزًا من ستة أرقام إلى هاتفك ({texted}) في رسالة نصية. اكتبه هنا، وهو صالح لمدة خمس عشرة دقيقة.";
+  /// SignInForm · text on the page
+  text "or" => "أو";
+
+  // ── SignInPage (/login) ──
+  /// SignInPage · /login · a title
+  /// shown through [Title]
+  title "Sign in" => "تسجيل الدخول";
+
+  // ── SignInScreen ──
+  /// SignInScreen · a heading
+  /// shown through AccountsFrame.heading
+  heading "Sign in" => "تسجيل الدخول";
+
+  // ── SignInWithCode ──
+  /// SignInWithCode · an error message
+  /// shown through ValidationException
+  error "That sign-in has expired — start again with your password." => "انتهت صلاحية تسجيل الدخول هذا، ابدأ من جديد بكلمة المرور.";
+
+  // ── SignInWithPhone ──
+  /// SignInWithPhone · an error message
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through ValidationException
+  error "{AccountsAppName} does not sign people in by text message." => "لا يتيح {AccountsAppName} تسجيل الدخول عبر الرسائل النصية.";
+
+  // ── SignInWithProvider ──
+  /// SignInWithProvider · an error message
+  /// shown through ValidationException
+  error "That sign-in could not be verified, or the provider has not confirmed your address — start again from the sign-in page." => "تعذّر التحقق من تسجيل الدخول هذا، أو أن المزوّد لم يؤكد عنوانك. ابدأ من جديد من صفحة تسجيل الدخول.";
+  /// SignInWithProvider · an error message
+  /// placeholders: {address} = address (string), {provider} = provider (string)
+  /// shown through ValidationException
+  error "There is an account for {address}, but it has not confirmed its address yet. We have sent a link to confirm it — then sign in with {provider} again, or sign in with your password." => "يوجد حساب لـ {address}، لكنه لم يؤكد عنوانه بعد. أرسلنا رابطًا لتأكيده، ثم سجّل الدخول باستخدام {provider} مجددًا، أو سجّل الدخول بكلمة المرور.";
+
+  // ── SignInWithTextedCode ──
+  /// SignInWithTextedCode · an error message
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through ValidationException
+  error "{AccountsAppName} asks for an authenticator app on your account — a texted code is not enough. Sign in again to set one up." => "يطلب {AccountsAppName} تطبيق مصادقة لحسابك، ولا يكفي رمز مُرسل في رسالة نصية. سجّل الدخول مجددًا لإعداده.";
+
+  // ── SignUp ──
+  /// SignUp · an error message
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through ValidationException
+  error "{AccountsAppName} is not open for sign-up — ask the person who runs it for an account." => "التسجيل غير متاح في {AccountsAppName}. اطلب حسابًا من المسؤول عنه.";
+
+  // ── SignUpForm ──
+  /// SignUpForm · a button's label · at most ~20 characters
+  /// shown through Button.label
+  /// beside: "Your name", "Email", "Password", "I already have an account"
+  button "Create account" => "إنشاء حساب";
+  /// SignUpForm · a hint under a field
+  /// placeholders: {facts.MinPasswordLength} = facts.MinPasswordLength (int) — {facts.MinPasswordLength} is a count: give one text per plural form
+  /// shown through Field.hint
+  /// beside: "Your name", "Email", "Create account", "I already have an account"
+  /// also in ResetPasswordForm
+  /// also in ConfirmPasswordStep
+  /// also in AccountSettings
+  hint "At least {facts.MinPasswordLength} characters." => { zero: "على الأقل {facts.MinPasswordLength} حرفًا.", one: "على الأقل {facts.MinPasswordLength} حرفًا.", two: "على الأقل {facts.MinPasswordLength} حرفًا.", few: "على الأقل {facts.MinPasswordLength} حرفًا.", many: "على الأقل {facts.MinPasswordLength} حرفًا.", other: "على الأقل {facts.MinPasswordLength} حرفًا." };
+  /// SignUpForm · a label (a field, a list item, a menu entry) · at most ~15 characters
+  /// shown through Field.label
+  /// beside: "Email", "Password", "Create account", "I already have an account"
+  label "Your name" => "اسمك";
+  /// SignUpForm · a link · at most ~35 characters
+  /// shown through TextLink.label
+  /// beside: "Your name", "Email", "Password", "Create account"
+  link "I already have an account" => "لدي حساب بالفعل";
+  /// SignUpForm · a link · at most ~38 characters
+  /// shown through TextLink.label
+  link "I have an account — sign in" => "لدي حساب، تسجيل الدخول";
+  /// SignUpForm · message
+  /// placeholders: {facts.AppName} = facts.AppName (string)
+  /// shown through Alert.message
+  message "Your account is made. {facts.AppName} asks for two-step sign-in on it — set it up now, and you are in." => "تم إنشاء حسابك. يطلب {facts.AppName} تفعيل تسجيل الدخول بخطوتين عليه، أعدّه الآن وستدخل مباشرة.";
+  /// SignUpForm · message
+  /// placeholders: {facts.AppName} = facts.AppName (string)
+  /// shown through Alert.message
+  /// beside: "I have an account — sign in"
+  message "{facts.AppName} is not open for sign-up. Ask the person who runs it for an account." => "التسجيل غير متاح في {facts.AppName}. اطلب حسابًا من المسؤول عنه.";
+  /// SignUpForm · placeholder text inside an empty field · at most ~31 characters
+  /// shown through Field.placeholder
+  /// beside: "Email", "Password", "Create account", "I already have an account"
+  placeholder "How colleagues see you" => "كيف يراك زملاؤك";
+
+  // ── SignUpPage (/sign-up) ──
+  /// SignUpPage · /sign-up · a title
+  /// shown through [Title]
+  title "Create an account" => "إنشاء حساب";
+
+  // ── SignUpScreen ──
+  /// SignUpScreen · a heading
+  /// shown through AccountsFrame.heading
+  heading "Create an account" => "إنشاء حساب";
+
+  // ── SignUpWithProvider ──
+  /// SignUpWithProvider · an error message
+  /// shown through ValidationException
+  /// also in SignUp
+  error "The app's AccountKinds.New made an account for another address — it must use the one it was given." => "أنشأ AccountKinds.New في التطبيق حسابًا لعنوان آخر، ويجب أن يستخدم العنوان الذي أُعطي له.";
+
+  // ── StartStepUp ──
+  /// StartStepUp · an error message
+  /// shown through ValidationException
+  error "Sign in first." => "سجّل الدخول أولًا.";
+
+  // ── UnlinkProvider ──
+  /// UnlinkProvider · an error message
+  /// placeholders: {provider} = provider (string)
+  /// shown through ValidationException
+  error "{provider} does not sign in to this account." => "{provider} غير مرتبط بتسجيل الدخول إلى هذا الحساب.";
+
+  // ── Verified ──
+  /// Verified · an error message
+  /// shown through ValidationException
+  error "That is not your current password." => "هذه ليست كلمة مرورك الحالية.";
+
+  // ── VerifyEmail ──
+  /// VerifyEmail · an error message
+  /// shown through ValidationException
+  error "That link has expired or was already used — sign in to have a new one sent." => "انتهت صلاحية هذا الرابط أو سبق استخدامه. سجّل الدخول ليُرسل إليك رابط جديد.";
+
+  // ── VerifyEmailPage (/verify-email/{token}) ──
+  /// VerifyEmailPage · /verify-email/{token} · a title
+  /// shown through [Title]
+  title "Confirm your address" => "أكّد عنوانك";
+
+  // ── VerifyEmailResult ──
+  /// VerifyEmailResult · a link · at most ~14 characters
+  /// shown through TextLink.label
+  link "Continue" => "متابعة";
+  /// VerifyEmailResult · message
+  /// placeholders: {step.Account} = step.Account (string)
+  /// shown through Alert.message
+  /// beside: "Continue"
+  message "{step.Account} is confirmed." => "تم تأكيد {step.Account}.";
+  /// VerifyEmailResult · text on the page
+  text "Confirming…" => "جارٍ التأكيد…";
+
+  // ── VerifyEmailScreen ──
+  /// VerifyEmailScreen · a heading
+  /// shown through AccountsFrame.heading
+  heading "Confirm your address" => "أكّد عنوانك";
+}

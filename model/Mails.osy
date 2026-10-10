@@ -1,0 +1,235 @@
+// The mail an account is sent, in Osysharp.EmailTemplates' frame and the app's theme. An app that wants its own words
+// derives from `AccountMails`, overrides the ones it writes, and names it in `app.Accounts` (`Mails = new MyMails()`).
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.EmailTemplates;
+
+/// One method per kind of mail. Every mail about an account is asked for HERE, never by a template's name, so an
+/// override reaches every place that mail goes out from.
+public class AccountMails {
+  /// A link to choose a new password.
+  public virtual RenderedEmail PasswordReset(User account, string link) { return AccountResetMail(account, link); }
+  /// What proves `address` receives mail — a link and a six-digit `code`, either one enough — for the account's own
+  /// address, or (`isChange`) the one it asked to move to.
+  public virtual RenderedEmail Verification(User account, string address, string link, bool isChange, string code) {
+    return AccountVerifyMail(account, address, link, isChange, code);
+  }
+  /// To an address somebody tried to sign up with, when it already has an account — in place of a code, so the sign-up
+  /// page never has to say so.
+  public virtual RenderedEmail AccountExists(string address, string signInLink, string resetLink) {
+    return AccountExistsMail(address, signInLink, resetLink);
+  }
+  /// A phone number was added to the account (`added`), or removed from it.
+  public virtual RenderedEmail PhoneChanged(User account, string phone, bool added) { return AccountPhoneMail(account, phone, added); }
+  /// A texted code was turned on (`on`) or off as the account's second step.
+  public virtual RenderedEmail TextedStepChanged(User account, bool on) { return AccountTextedStepMail(account, on); }
+  /// To the OLD address, when the account asks to move to `newAddress` — how its owner finds out when it was not them.
+  public virtual RenderedEmail AddressChangeRequested(User account, string newAddress) {
+    return AccountAddressChangeMail(account, newAddress);
+  }
+  /// To the OLD address `oldAddress`, when somebody who looks after the app's people moved the account to `newAddress`
+  /// (`ChangeAddressFor`) — how its owner finds out, whoever asked. Nothing to click: the change is made.
+  public virtual RenderedEmail AddressChangedFor(User account, string oldAddress, string newAddress) {
+    return AccountAddressChangedMail(account, oldAddress, newAddress);
+  }
+  /// To the NEW address, when the account was moved there for its owner (`ChangeAddressFor`) — a welcome, nothing to
+  /// click.
+  public virtual RenderedEmail AddressMovedHere(User account, string oldAddress) {
+    return AccountAddressMovedHereMail(account, oldAddress);
+  }
+  /// The password was changed.
+  public virtual RenderedEmail PasswordChanged(User account) { return AccountPasswordChangedMail(account); }
+  /// Two-step sign-in was turned on.
+  public virtual RenderedEmail SecondFactorOn(User account) { return AccountSecondFactorMail(account, true); }
+  /// Two-step sign-in was turned off.
+  public virtual RenderedEmail SecondFactorOff(User account) { return AccountSecondFactorMail(account, false); }
+  /// Somebody who looks after the app's people reset the account's two-step sign-in (a lost phone).
+  public virtual RenderedEmail SecondFactorReset(User account) { return AccountSecondFactorResetMail(account); }
+  /// A recovery code was used to sign in or make a change; `left` are still unspent.
+  public virtual RenderedEmail RecoveryCodeUsed(User account, int left) { return AccountRecoveryCodeUsedMail(account, left); }
+  /// A provider (Google, GitHub, …) now signs in to the account.
+  public virtual RenderedEmail ProviderLinked(User account, string provider) { return AccountProviderMail(account, provider, true); }
+  /// A provider no longer signs in to the account.
+  public virtual RenderedEmail ProviderUnlinked(User account, string provider) { return AccountProviderMail(account, provider, false); }
+  /// The code that proves it is you, now, for `purpose` (`StartStepUp`).
+  public virtual RenderedEmail StepUpCode(User account, string code, CodePurpose purpose) { return AccountStepUpMail(account, code, purpose); }
+}
+
+[Email]
+public component AccountResetMail(User account, string link) {
+  subject => $"Choose a new password for {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: "The link works once, for an hour.") {
+      EmailHeading("Choose a new password");
+      EmailText($"Somebody — we hope you — asked to choose a new password for {account.Email}.");
+      EmailButton("Choose a new password", link);
+      EmailNote("The link works once, for an hour. If you did not ask, ignore this mail: your password has not changed.");
+    }
+  }
+}
+
+[Email]
+public component AccountVerifyMail(User account, string address, string link, bool isChange, string code) {
+  subject => isChange ? $"Confirm your new address for {AccountsAppName()}" : $"Confirm your address for {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: $"Your code is {code} — or one click and it is confirmed.") {
+      EmailHeading(isChange ? "Confirm your new address" : "Confirm your address");
+      EmailText(isChange
+        ? $"You asked to sign in to {AccountsAppName()} with {address} from now on. Confirm it is yours, and your account moves to it."
+        : $"Confirm that {address} is yours, so {AccountsAppName()} can reach you.");
+      EmailText($"Type this code where you were asked for it: {code}");
+      EmailButton(isChange ? "Confirm my new address" : "Confirm my address", link);
+      EmailNote("The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes.");
+    }
+  }
+}
+
+[Email]
+public component AccountExistsMail(string address, string signInLink, string resetLink) {
+  subject => $"You already have an account with {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: "Sign in, or choose a new password.") {
+      EmailHeading("You already have an account");
+      EmailText($"Somebody — we hope you — tried to make a new account for {address}. There already is one, so nothing new was made.");
+      EmailButton("Sign in", signInLink);
+      EmailText($"Forgotten the password? Choose a new one: {resetLink}");
+      EmailNote("If this was not you, ignore this mail — your account has not changed.");
+    }
+  }
+}
+
+[Email]
+public component AccountPhoneMail(User account, string phone, bool added) {
+  subject => added ? $"A phone number was added to your {AccountsAppName()} account" : $"A phone number was removed from your {AccountsAppName()} account";
+  render {
+    EmailLayout(AccountsAppName(), preview: added ? $"{MaskedPhone(phone)} is now on your account." : "If this was you, there is nothing to do.") {
+      EmailHeading(added ? "A phone number was added" : "A phone number was removed");
+      EmailText(added
+        ? $"The number ending {MaskedPhone(phone)} is now on the account {account.Email}."
+        : $"The number ending {MaskedPhone(phone)} is no longer on the account {account.Email}.");
+      EmailNote("If this was not you, choose a new password at once: whoever did it knows your password.");
+    }
+  }
+}
+
+[Email]
+public component AccountTextedStepMail(User account, bool on) {
+  subject => on ? $"Sign-in codes by text are on for {AccountsAppName()}" : $"Sign-in codes by text are off for {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: on ? "Signing in now asks for a code texted to your phone." : "Signing in now asks only for your password.") {
+      EmailHeading(on ? "Sign-in codes by text are on" : "Sign-in codes by text are off");
+      EmailText(on
+        ? $"Signing in to {AccountsAppName()} as {account.Email} now asks for a code texted to your phone after the password."
+        : $"Signing in to {AccountsAppName()} as {account.Email} now asks only for the password.");
+      EmailNote(on
+        ? "For stronger protection, use an authenticator app instead — a phone number can be moved to somebody else's SIM."
+        : "If this was not you, choose a new password at once.");
+    }
+  }
+}
+
+[Email]
+public component AccountAddressChangeMail(User account, string newAddress) {
+  subject => $"Your {AccountsAppName()} address is changing";
+  render {
+    EmailLayout(AccountsAppName(), preview: $"A request to sign in with {newAddress} instead.") {
+      EmailHeading("Your address is changing");
+      EmailText($"Somebody signed in as {account.Email} asked to move the account to {newAddress}. It moves once that address confirms it.");
+      EmailNote("If this was not you, change your password now: whoever asked knows it.");
+    }
+  }
+}
+
+[Email]
+public component AccountAddressChangedMail(User account, string oldAddress, string newAddress) {
+  subject => $"Your {AccountsAppName()} address was changed";
+  render {
+    EmailLayout(AccountsAppName(), preview: $"The account now signs in with {newAddress}.") {
+      EmailHeading("Your address was changed");
+      EmailText($"At your request, somebody at {AccountsAppName()} moved the account for {oldAddress} to {newAddress}. It signs in with that address from now on, with the same password.");
+      EmailNote($"If you did not ask for this, tell {AccountsAppName()} at once.");
+    }
+  }
+}
+
+[Email]
+public component AccountAddressMovedHereMail(User account, string oldAddress) {
+  subject => $"Your {AccountsAppName()} account now uses this address";
+  render {
+    EmailLayout(AccountsAppName(), preview: "Sign in with this address from now on.") {
+      EmailHeading("Welcome to your account at this address");
+      EmailText($"Your {AccountsAppName()} account, which used {oldAddress}, now signs in with this address — with the same password. There is nothing you need to do.");
+      EmailNote("Forgotten the password? Choose a new one from the sign-in page: the link comes here now.");
+    }
+  }
+}
+
+[Email]
+public component AccountPasswordChangedMail(User account) {
+  subject => $"Your {AccountsAppName()} password was changed";
+  render {
+    EmailLayout(AccountsAppName(), preview: "If this was you, there is nothing to do.") {
+      EmailHeading("Your password was changed");
+      EmailText($"The password for {account.Email} was just changed. If this was you, there is nothing to do.");
+      EmailNote("If it was not you, choose a new password from the sign-in page at once — the link there comes to this address.");
+    }
+  }
+}
+
+[Email]
+public component AccountSecondFactorMail(User account, bool on) {
+  subject => on ? $"Two-step sign-in is on for {AccountsAppName()}" : $"Two-step sign-in is off for {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: on ? "Signing in now asks for a code from your app." : "Signing in now asks only for your password.") {
+      EmailHeading(on ? "Two-step sign-in is on" : "Two-step sign-in is off");
+      EmailText(on
+        ? $"Signing in to {AccountsAppName()} as {account.Email} now asks for a code from your authenticator app after the password."
+        : $"Signing in to {AccountsAppName()} as {account.Email} now asks only for the password.");
+      EmailNote(on
+        ? "Keep your recovery codes somewhere safe — each one signs you in once if you lose your phone."
+        : "If this was not you, choose a new password at once and turn two-step sign-in back on: whoever did it knows your password and had a code.");
+    }
+  }
+}
+
+[Email]
+public component AccountSecondFactorResetMail(User account) {
+  subject => $"Your two-step sign-in for {AccountsAppName()} was reset";
+  render {
+    EmailLayout(AccountsAppName(), preview: "Set it up again the next time you sign in.") {
+      EmailHeading("Your two-step sign-in was reset");
+      EmailText($"Somebody who looks after {AccountsAppName()}'s people reset two-step sign-in for {account.Email} — usually because a phone was lost. Your authenticator app and your recovery codes no longer sign you in, and you were signed out everywhere.");
+      EmailText("Sign in with your password and set two-step sign-in up again from your account page — or, where it is required of you, the sign-in itself will ask.");
+      EmailNote("If you did not ask for this, tell the person who runs the app at once, and choose a new password.");
+    }
+  }
+}
+
+[Email]
+public component AccountRecoveryCodeUsedMail(User account, int left) {
+  subject => $"A recovery code was used for {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: $"{left} of your recovery codes are left.") {
+      EmailHeading("A recovery code was used");
+      EmailText($"One of the recovery codes for {account.Email} was just used. Each works once; {left} are left.");
+      EmailNote("If this was not you, choose a new password and ask for new recovery codes from your account page at once.");
+    }
+  }
+}
+
+[Email]
+public component AccountProviderMail(User account, string provider, bool linked) {
+  subject => linked ? $"{provider} now signs in to {AccountsAppName()}" : $"{provider} no longer signs in to {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: linked ? $"Continue with {provider} signs you in from now on." : "If this was you, there is nothing to do.") {
+      EmailHeading(linked ? $"{provider} is linked" : $"{provider} is unlinked");
+      EmailText(linked
+        ? $"Your {provider} account now signs in to {AccountsAppName()} as {account.Email}."
+        : $"Your {provider} account no longer signs in to {AccountsAppName()} as {account.Email}.");
+      EmailNote(linked
+        ? "If this was not you, unlink it from your account page and choose a new password at once."
+        : "If this was not you, choose a new password at once: whoever did it knows your password.");
+    }
+  }
+}

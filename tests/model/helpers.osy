@@ -1,0 +1,53 @@
+// Test helpers — ordinary functions. The mailbox is stood in for by the outbox: a test reads the link a mail carried as
+// the sign-in flow (`runas (AuthBootstrap) { … }`), the only reader the outbox has here, which is honest only because
+// the kit really does put the link in a mail (the tests assert the mail too).
+using Osysharp.Mail;
+using Osysharp.Sms;
+using Osysharp.UserAccounts;
+
+/// The token in the newest mail to `to` whose text carries `path` ("/reset-password/"), or "" when there is none.
+string TokenIn(string to, string path) {
+  var mail = OutgoingMail.Where(m => m.To == to && m.Text != null && m.Text.Contains(path))
+    .OrderByDescending(m => m.CreatedAt).FirstOrDefault();
+  if (mail == null) { return ""; }
+  var text = mail.Text ?? "";
+  var at = text.IndexOf(path) + path.Length;
+  var end = at;
+  while (end < text.Length && text.Substring(end, 1) != " " && text.Substring(end, 1) != "\n" && text.Substring(end, 1) != ")") {
+    end = end + 1;
+  }
+  return text.Substring(at, end - at);
+}
+
+/// The six-digit code in the newest mail to `to` that carries one ("…: 123456"), or "".
+string CodeIn(string to) {
+  var mail = OutgoingMail.Where(m => m.To == to && m.Text != null && m.Text.Contains("Type this code where you were asked for it: "))
+    .OrderByDescending(m => m.CreatedAt).FirstOrDefault();
+  if (mail == null) { return ""; }
+  var text = mail.Text ?? "";
+  var at = text.IndexOf("Type this code where you were asked for it: ") + "Type this code where you were asked for it: ".Length;
+  return text.Substring(at, 6);
+}
+
+/// The six-digit code in the newest text to `phone` — its first six characters, as every code text begins — or "".
+string TextedCode(string phone) {
+  var sms = OutgoingSms.Where(m => m.To == phone).OrderByDescending(m => m.CreatedAt).FirstOrDefault();
+  return sms == null ? "" : sms.Text.Substring(0, 6);
+}
+
+/// How many texts went to `phone`.
+int TextsTo(string phone) { return OutgoingSms.Count(m => m.To == phone); }
+
+/// How many mails went to `to` with a subject starting `subject`.
+int MailsTo(string to, string subject) {
+  return OutgoingMail.Count(m => m.To == to && m.Subject.StartsWith(subject));
+}
+
+// Direct writes to an account, as whoever calls them — what the security tests try and expect to be refused (or, for a
+// person's own name, allowed).
+void Rename(string email, string name) { User.Single(u => u.Email == email).DisplayName = name; }
+void MarkVerified(string email) { User.Single(u => u.Email == email).EmailVerifiedAt = DateTime.UtcNow; }
+void MoveAddress(string email, string newEmail) { User.Single(u => u.Email == email).Email = newEmail; }
+void SetPhone(string email, string phone) { User.Single(u => u.Email == email).Phone = phone; }
+void MarkPhoneProven(string email) { User.Single(u => u.Email == email).PhoneVerifiedAt = DateTime.UtcNow; }
+void SetPassword(string email, string password) { User.Single(u => u.Email == email).PasswordHash = Security.HashPassword(password); }

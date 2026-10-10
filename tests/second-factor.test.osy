@@ -1,0 +1,294 @@
+// Two-step sign-in — through the kit's functions, as the sign-in flow runs them, with the test playing the phone
+// (`Totp.Code`). Each enrolment uses the code for NOW; the next proof uses the code for the NEXT step (which the ±30 s
+// window accepts) or a recovery code — a code is good once.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void TwoStepDesk() {
+  var ada = new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+                       EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = ada, Role = AppRole.Member };
+  new User { Email = "eve@desk.test", DisplayName = "Eve", PasswordHash = Security.HashPassword("battery-staple-2"),
+             EmailVerifiedAt = DateTime.UtcNow };
+  // An admin — whom this app requires to use two-step sign-in (AdminsUseCodes) — who has not set it up yet.
+  var root = new User { Email = "root@desk.test", DisplayName = "Root", PasswordHash = Security.HashPassword("correct-horse-9"),
+                        EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = root, Role = AppRole.Admin };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+principal Eve => User.Single(u => u.Email == "eve@desk.test");
+principal Fay => User.Single(u => u.Email == "founder@desk.test");
+
+/// The code the phone shows for the NEXT step — accepted now, and not the one enrolment just spent.
+string NextCode(string key) { return Totp.Code(key, DateTime.UtcNow.AddSeconds(30)); }
+
+/// A code for a step far outside the window — well-formed, and wrong.
+string WrongCode(string key) { return Totp.Code(key, DateTime.UtcNow.AddMinutes(10)); }
+
+[Test(TwoStepDesk)]
+void with_two_step_on_a_password_alone_answers_a_challenge_and_no_ticket() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("ada@desk.test", "correct-horse-1"); }
+  Assert.Equal("", step.Ticket);
+  Assert.NotEqual("", step.Challenge);
+  Assert.False(step.MustEnrol);
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignInWithCode(step.Challenge, NextCode(key)); }
+  Assert.NotEqual("", ticket);
+  // …and the password alone still answers nothing to sign in with, however often it is asked.
+  runas (AuthBootstrap) { Assert.Equal("", SignIn("ada@desk.test", "correct-horse-1").Ticket); }
+}
+
+[Test(TwoStepDesk)]
+void turning_it_on_answers_a_ticket_ten_recovery_codes_and_a_mail() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  Assert.NotEqual("", on.Ticket);
+  Assert.Equal(10, on.RecoveryCodes.Count);
+  Assert.Equal(11, on.RecoveryCodes[0].Length);
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("ada@desk.test", "Two-step sign-in is on")); }
+  runas (Ada) {
+    var mine = MySecondFactor();
+    Assert.True(mine.On);
+    Assert.Equal(10, mine.RecoveryCodesLeft);
+  }
+}
+
+[Test(TwoStepDesk)]
+void turning_it_on_needs_the_password_and_a_code_from_the_key_it_was_given() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) {
+    Assert.Throws(() => EnableSecondFactor("ada@desk.test", "wrong-guess", key, Totp.Code(key)));
+    Assert.Throws(() => EnableSecondFactor("ada@desk.test", "correct-horse-1", key, WrongCode(key)));
+    Assert.Throws(() => EnableSecondFactor("ada@desk.test", "correct-horse-1", "not a key", "123456"));
+  }
+  runas (AuthBootstrap) { Assert.Equal("", SignIn("ada@desk.test", "correct-horse-1").Challenge); }
+}
+
+[Test(TwoStepDesk)]
+void a_wrong_code_is_refused_and_a_used_code_is_refused_again() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  var first = Totp.Code(key);
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, first); }
+  string challenge = "";
+  runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
+  runas (AuthBootstrap) {
+    Assert.Equal("", SignInWithCode(challenge, WrongCode(key)));
+    Assert.Equal("", SignInWithCode(challenge, first));          // enrolment spent it: a replay
+  }
+  var next = NextCode(key);
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignInWithCode(challenge, next); }
+  Assert.NotEqual("", ticket);
+  // The code that just signed in is spent too — on a fresh challenge it is refused.
+  string again = "x";
+  runas (AuthBootstrap) { again = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, next); }
+  Assert.Equal("", again);
+}
+
+[Test(TwoStepDesk)]
+void a_challenge_is_single_use() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  List<string> codes = [];
+  runas (AuthBootstrap) { codes = NewRecoveryCodes("ada@desk.test", "correct-horse-1", NextCode(key)); }
+  string challenge = "";
+  runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithCode(challenge, codes[0])); }
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(challenge, codes[1])); }
+}
+
+[Test(TwoStepDesk)]
+void a_recovery_code_signs_in_once_and_the_owner_is_told() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, on.RecoveryCodes[0]); }
+  Assert.NotEqual("", ticket);
+  string again = "x";
+  runas (AuthBootstrap) { again = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, on.RecoveryCodes[0]); }
+  Assert.Equal("", again);
+  // Typed as a person types it — upper-case, spaced — another code still works.
+  string typed = "";
+  runas (AuthBootstrap) {
+    typed = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, " " + on.RecoveryCodes[1].ToUpper().Replace("-", " - "));
+  }
+  Assert.NotEqual("", typed);
+  runas (AuthBootstrap) { Assert.Equal(2, MailsTo("ada@desk.test", "A recovery code was used")); }
+  runas (Ada) { Assert.Equal(8, MySecondFactor().RecoveryCodesLeft); }
+}
+
+[Test(TwoStepDesk)]
+void a_challenge_dies_at_its_fifth_wrong_code() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  string challenge = "";
+  runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
+  for (var i = 0; i < 5; i++) {
+    runas (AuthBootstrap) { Assert.Equal("", SignInWithCode(challenge, WrongCode(key))); }
+  }
+  // The right code, on the spent challenge: refused — sign-in starts again from the password.
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(challenge, NextCode(key))); }
+}
+
+[Test(TwoStepDesk)]
+void ten_wrong_codes_stop_every_code_for_the_account_a_right_one_included() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  // A fresh challenge per five guesses does not escape it: the limit is the ACCOUNT's.
+  for (var round = 0; round < 2; round++) {
+    string challenge = "";
+    runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
+    for (var i = 0; i < 5; i++) {
+      runas (AuthBootstrap) { Assert.Equal("", SignInWithCode(challenge, WrongCode(key))); }
+    }
+  }
+  string last = "";
+  runas (AuthBootstrap) { last = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(last, NextCode(key))); }
+  // …and the changes that take a code are held by the same limit.
+  runas (AuthBootstrap) { Assert.Throws(() => DisableSecondFactor("ada@desk.test", "correct-horse-1", NextCode(key))); }
+}
+
+[Test(TwoStepDesk)]
+void a_mailed_reset_sets_the_password_but_signs_nobody_in_past_the_second_factor() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
+  string ticket = "x";
+  runas (AuthBootstrap) { ticket = ResetPassword(token, "a-whole-new-one"); }
+  Assert.Equal("", ticket);
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("ada@desk.test", "a-whole-new-one"); }
+  Assert.Equal("", step.Ticket);
+  Assert.NotEqual("", step.Challenge);
+}
+
+[Test(TwoStepDesk)]
+void an_account_the_app_requires_it_of_sets_it_up_before_it_is_given_any_ticket() {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("root@desk.test", "correct-horse-9"); }
+  Assert.True(step.MustEnrol);
+  Assert.Equal("", step.Ticket);
+  Assert.Equal("", step.Challenge);
+  var key = NewSecondFactorSetup("root@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("root@desk.test", "correct-horse-9", key, Totp.Code(key)); }
+  Assert.NotEqual("", on.Ticket);
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("root@desk.test", "correct-horse-9").Challenge); }
+  // An account nobody requires it of signs straight in.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("ada@desk.test", "correct-horse-1").Ticket); }
+}
+
+[Test]
+void the_first_account_is_given_the_admin_role_so_sign_up_asks_for_two_step_first() {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignUp("founder@desk.test", "a-long-password", "Fay"); }
+  Assert.True(step.MustEnrol);
+  Assert.Equal("", step.Ticket);
+  runas (Fay) { Assert.True(MySecondFactor().Required); }
+}
+
+[Test(TwoStepDesk)]
+void nobody_signed_in_reads_a_second_factor_secret_or_a_recovery_code_their_own_included() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  runas (Ada) {
+    Assert.Null(User.Single(u => u.Email == "ada@desk.test").TotpSecret);
+    Assert.Null(MyTotpSecret());
+    Assert.Equal(10, RecoveryCode.Count(r => r.Account == Ada));
+    Assert.Null(RecoveryCode.First(r => r.Account == Ada).CodeHash);
+  }
+  runas (Eve) {
+    Assert.Null(User.Single(u => u.Email == "ada@desk.test").TotpSecret);
+    Assert.Equal(0, RecoveryCode.Count());
+  }
+  // The sign-in flow reads it — the positive half, without which the nulls above prove nothing — and what it reads is
+  // SEALED: the key itself is not what the column holds.
+  runas (AuthBootstrap) {
+    var stored = User.Single(u => u.Email == "ada@desk.test").TotpSecret;
+    Assert.NotNull(stored);
+    Assert.NotEqual(key, stored);
+    Assert.Equal(key, Crypto.Decrypt(stored!));
+    Assert.NotNull(RecoveryCode.First(r => r.Account.Email == "ada@desk.test").CodeHash);
+  }
+}
+
+[Test(TwoStepDesk)]
+void nobody_signed_in_sets_or_clears_a_second_factor_their_own_included() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  runas (Ada) { Assert.Denied(() => SetTotpSecret("ada@desk.test", null)); }
+  runas (Ada) { Assert.Denied(() => SetTotpSecret("eve@desk.test", Crypto.Encrypt(key))); }
+  runas (Ada) { Assert.Denied(() => new RecoveryCode { Account = Ada, CodeHash = "chosen" }); }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("ada@desk.test", "correct-horse-1").Challenge); }
+}
+
+[Test(TwoStepDesk)]
+void turning_it_off_takes_the_password_and_a_code_not_the_password_alone() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  runas (AuthBootstrap) {
+    Assert.Throws(() => DisableSecondFactor("ada@desk.test", "correct-horse-1", ""));
+    Assert.Throws(() => DisableSecondFactor("ada@desk.test", "wrong-guess", NextCode(key)));
+  }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("ada@desk.test", "correct-horse-1").Challenge); }
+  runas (AuthBootstrap) { DisableSecondFactor("ada@desk.test", "correct-horse-1", NextCode(key)); }
+  runas (AuthBootstrap) {
+    Assert.NotEqual("", SignIn("ada@desk.test", "correct-horse-1").Ticket);
+    Assert.Equal(1, MailsTo("ada@desk.test", "Two-step sign-in is off"));
+  }
+  runas (Ada) { Assert.False(MySecondFactor().On); }
+}
+
+[Test(TwoStepDesk)]
+void with_it_on_the_password_and_the_address_change_only_with_a_code() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  runas (AuthBootstrap) {
+    Assert.Throws(() => ChangePassword("ada@desk.test", "correct-horse-1", "a-brand-new-one"));
+    Assert.Throws(() => ChangeEmail("ada@desk.test", "correct-horse-1", "ada.new@desk.test"));
+  }
+  runas (AuthBootstrap) { ChangePassword("ada@desk.test", "correct-horse-1", "a-brand-new-one", NextCode(key)); }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("ada@desk.test", "a-brand-new-one").Challenge); }
+}
+
+[Test(TwoStepDesk)]
+void new_recovery_codes_spend_the_old_ones() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  List<string> fresh = [];
+  runas (AuthBootstrap) { fresh = NewRecoveryCodes("ada@desk.test", "correct-horse-1", NextCode(key)); }
+  Assert.Equal(10, fresh.Count);
+  runas (AuthBootstrap) {
+    Assert.Equal("", SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, on.RecoveryCodes[0]));
+  }
+  runas (AuthBootstrap) {
+    Assert.NotEqual("", SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, fresh[0]));
+  }
+}
+
+// A code is judged by the run's own clock — the one `DateTime.UtcNow` answers — and not the wall's. Pinned far from the
+// wall, a code computed for the pinned instant must verify: the phone's half and the check read the same clock, so a long
+// suite never drifts into refusing right codes.
+[Test(TwoStepDesk)]
+void a_code_is_judged_by_the_runs_own_clock() {
+  TestClock.Set(DateTime.Parse("2031-06-01T12:00:00Z"));
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key, DateTime.UtcNow)); }
+  Assert.NotEqual("", on.Ticket);
+  string challenge = "";
+  runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithCode(challenge, Totp.Code(key, DateTime.UtcNow.AddSeconds(30)))); }
+}

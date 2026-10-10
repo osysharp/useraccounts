@@ -1,0 +1,28 @@
+// A page that writes the signed-in account's address straight from the browser — what a rogue client would send: the
+// field changed on the account's own row, committed as a client's unit of work. Only a test drives it
+// (email.test.osy's a_browser_cannot_move_its_own_account_to_another_address), and the server refuses it.
+using Osysharp.UserAccounts;
+
+[Route("/test/move-my-address")]
+[Title("Move my address")]
+[Render(CSR)]
+component MoveMyAddressPage() {
+  string outcome = "";
+  action Move() {
+    var me = Me();
+    if (me == null) { outcome = "Not signed in"; return; }
+    try {
+      me.Email = "mallory@desk.test";
+      UnitOfWork.Commit();
+      outcome = "Moved";
+    } catch (Exception e) {
+      outcome = "Refused";
+    }
+  }
+  render {
+    Stack(gap: 2, p: 4) {
+      Button("Move my address", onPress: Move);
+      if (outcome != "") { Text(outcome); }
+    }
+  }
+}

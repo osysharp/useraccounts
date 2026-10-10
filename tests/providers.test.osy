@@ -1,0 +1,199 @@
+// Signing in with a provider (Google, GitHub) — through the kit's functions, as the sign-in flow runs them. The sealed
+// token the platform's callback would hand the `/oauth/sign-in` page is made by `TestOAuth.PendingToken(address,
+// provider)`: the provider verified `address`, and its id for the person is derived from it, so two tokens for one
+// address are one provider identity.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void ProviderDesk() {
+  var ada = new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+                       EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = ada, Role = AppRole.Member };
+  // An account whose address nobody has proven — made, say, by somebody who typed Una's address with a password of
+  // their own.
+  new User { Email = "una@desk.test", DisplayName = "Una", PasswordHash = Security.HashPassword("squatter-pass-1") };
+  // An admin, whom this app requires to use two-step sign-in (AdminsUseCodes), who has not set it up.
+  var root = new User { Email = "root@desk.test", DisplayName = "Root", PasswordHash = Security.HashPassword("correct-horse-9"),
+                        EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = root, Role = AppRole.Admin };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+principal Nils => User.Single(u => u.Email == "nils@desk.test");
+
+/// The code the phone shows for the NEXT step — accepted now, and not the one enrolment just spent.
+string NextStepCode(string key) { return Totp.Code(key, DateTime.UtcNow.AddSeconds(30)); }
+
+[Test(ProviderDesk)]
+void a_new_visitor_signs_up_with_a_provider_and_the_same_identity_signs_in_again() {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("Nils@Desk.test", "Google")); }
+  Assert.NotEqual("", step.Ticket);
+  runas (AuthBootstrap) {
+    var nils = User.Single(u => u.Email == "nils@desk.test");
+    // The provider verified the address, so it is proven; there is no password, and the app's sign-up role is given.
+    Assert.NotNull(nils.EmailVerifiedAt);
+    Assert.Null(nils.PasswordHash);
+    Assert.True(RoleGrant.Any(g => g.Member == nils && g.Role == AppRole.Member));
+  }
+  // The same Google identity again: the link signs it in to the same account, and makes no second one.
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("nils@desk.test", "Google")); }
+  Assert.NotEqual("", step.Ticket);
+  runas (AuthBootstrap) { Assert.Equal(1, User.Count(u => u.Email == "nils@desk.test")); }
+  runas (Nils) { Assert.True(MyProviders().Linked.Contains("Google")); }
+}
+
+[Test(ProviderDesk)]
+void an_account_that_has_proven_its_address_is_linked_signed_in_and_told() {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("ada@desk.test", "Google")); }
+  Assert.NotEqual("", step.Ticket);
+  runas (AuthBootstrap) {
+    Assert.Equal(1, User.Count(u => u.Email == "ada@desk.test"));
+    Assert.Equal(1, MailsTo("ada@desk.test", "Google now signs in"));
+  }
+  runas (Ada) { Assert.True(MyProviders().Linked.Contains("Google")); }
+}
+
+[Test(ProviderDesk)]
+void an_address_nobody_has_proven_never_hands_the_account_to_a_provider() {
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithProvider(TestOAuth.PendingToken("una@desk.test", "Google"))); }
+  runas (AuthBootstrap) {
+    // Nothing was linked — a second try is refused the same way rather than signing straight in…
+    Assert.Throws(() => SignInWithProvider(TestOAuth.PendingToken("una@desk.test", "Google")));
+    // …and the address's real owner has been sent a link that proves it.
+    Assert.NotEqual("", TokenIn("una@desk.test", "/verify-email/"));
+  }
+}
+
+[Test(ProviderDesk)]
+void once_the_address_is_proven_the_same_provider_sign_in_goes_through() {
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithProvider(TestOAuth.PendingToken("una@desk.test", "Google"))); }
+  string link = "";
+  runas (AuthBootstrap) { link = TokenIn("una@desk.test", "/verify-email/"); }
+  // Una does not know the squatter's password: she proves the address by choosing her own, and the account is hers.
+  runas (AuthBootstrap) { VerifyEmail(link, "", "unas-own-password"); }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithProvider(TestOAuth.PendingToken("una@desk.test", "Google")).Ticket); }
+  runas (AuthBootstrap) { Assert.Equal("", SignIn("una@desk.test", "squatter-pass-1").Ticket); }
+}
+
+[Test(ProviderDesk)]
+void with_two_step_on_a_provider_sign_in_asks_for_the_code_before_any_ticket() {
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("ada@desk.test", "Google")); }
+  Assert.Equal("", step.Ticket);
+  Assert.NotEqual("", step.Challenge);
+  // Linked now — and a linked identity still gets a challenge, never a ticket.
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("ada@desk.test", "Google")); }
+  Assert.Equal("", step.Ticket);
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignInWithCode(step.Challenge, NextStepCode(key)); }
+  Assert.NotEqual("", ticket);
+}
+
+[Test(ProviderDesk)]
+void an_account_the_app_requires_it_of_sets_two_step_up_after_a_provider_sign_in_without_a_password() {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("root@desk.test", "GitHub")); }
+  Assert.True(step.MustEnrol);
+  Assert.Equal("", step.Ticket);
+  Assert.NotEqual("", step.Enrolment);
+  Assert.Equal("root@desk.test", step.Account);
+  var key = NewSecondFactorSetup(step.Account).Key;
+  // The enrolment token is not a code challenge…
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(step.Enrolment, Totp.Code(key))); }
+  // …and it proves the first step in place of a password nobody was asked for.
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("", "", key, Totp.Code(key), step.Enrolment); }
+  Assert.NotEqual("", on.Ticket);
+  // Spent: it does not turn two-step sign-in on a second time.
+  runas (AuthBootstrap) { Assert.Throws(() => EnableSecondFactor("", "", key, NextStepCode(key), step.Enrolment)); }
+  // From now on the provider sign-in answers a challenge.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithProvider(TestOAuth.PendingToken("root@desk.test", "GitHub")).Challenge); }
+}
+
+[Test(ProviderDesk)]
+void a_made_up_enrolment_token_turns_nothing_on() {
+  var key = NewSecondFactorSetup("root@desk.test").Key;
+  runas (AuthBootstrap) { Assert.Throws(() => EnableSecondFactor("", "", key, Totp.Code(key), "not-a-token")); }
+  runas (AuthBootstrap) { Assert.True(SignIn("root@desk.test", "correct-horse-9").MustEnrol); }
+}
+
+[Test(ProviderDesk)]
+void a_closed_app_answers_no_account_and_makes_none() {
+  SignupIsOpen.Stub(() => false);
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("nils@desk.test", "Google")); }
+  Assert.True(step.NoAccount);
+  Assert.Equal("", step.Ticket);
+  runas (AuthBootstrap) { Assert.False(User.Any(u => u.Email == "nils@desk.test")); }
+  // A closed app still signs its existing people in with a provider.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithProvider(TestOAuth.PendingToken("ada@desk.test", "Google")).Ticket); }
+}
+
+[Test(ProviderDesk)]
+void linking_from_the_account_page_takes_the_password_and_then_that_identity_signs_in() {
+  var github = TestOAuth.PendingToken("ada.codes@elsewhere.test", "GitHub");
+  runas (AuthBootstrap) { Assert.Throws(() => LinkProvider("ada@desk.test", "wrong-guess", github)); }
+  runas (AuthBootstrap) { LinkProvider("ada@desk.test", "correct-horse-1", github); }
+  runas (Ada) { Assert.True(MyProviders().Linked.Contains("GitHub")); }
+  // A GitHub account with an address of its own now signs in to Ada — and made no account for that address.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithProvider(TestOAuth.PendingToken("ada.codes@elsewhere.test", "GitHub")).Ticket); }
+  runas (AuthBootstrap) {
+    Assert.False(User.Any(u => u.Email == "ada.codes@elsewhere.test"));
+    Assert.Equal(1, MailsTo("ada@desk.test", "GitHub now signs in"));
+  }
+}
+
+[Test(ProviderDesk)]
+void an_identity_that_signs_in_to_one_account_cannot_be_linked_to_another() {
+  runas (AuthBootstrap) { SignInWithProvider(TestOAuth.PendingToken("nils@desk.test", "Google")); }
+  runas (AuthBootstrap) {
+    Assert.Throws(() => LinkProvider("ada@desk.test", "correct-horse-1", TestOAuth.PendingToken("nils@desk.test", "Google")));
+  }
+  runas (Ada) { Assert.False(MyProviders().Linked.Contains("Google")); }
+}
+
+[Test(ProviderDesk)]
+void unlinking_takes_the_password_and_the_provider_stops_signing_in() {
+  var github = TestOAuth.PendingToken("ada.codes@elsewhere.test", "GitHub");
+  runas (AuthBootstrap) { LinkProvider("ada@desk.test", "correct-horse-1", github); }
+  runas (AuthBootstrap) { Assert.Throws(() => UnlinkProvider("ada@desk.test", "wrong-guess", "GitHub")); }
+  runas (Ada) { Assert.True(MyProviders().Linked.Contains("GitHub")); }
+  runas (AuthBootstrap) { UnlinkProvider("ada@desk.test", "correct-horse-1", "GitHub"); }
+  runas (Ada) { Assert.False(MyProviders().Linked.Contains("GitHub")); }
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("ada@desk.test", "GitHub no longer signs in")); }
+  // The GitHub identity is no longer Ada's: signing in with it makes an account of its own address instead.
+  runas (AuthBootstrap) { SignInWithProvider(TestOAuth.PendingToken("ada.codes@elsewhere.test", "GitHub")); }
+  runas (AuthBootstrap) { Assert.True(User.Any(u => u.Email == "ada.codes@elsewhere.test")); }
+}
+
+[Test(ProviderDesk)]
+void the_account_page_lists_the_providers_the_app_offers() {
+  runas (Ada) {
+    var facts = MyProviders();
+    Assert.Equal(2, facts.Offered.Count);
+    Assert.True(facts.Offered.Contains("Google"));
+    Assert.True(facts.Offered.Contains("GitHub"));
+    Assert.Equal(0, facts.Linked.Count);
+  }
+}
+
+[Test(ProviderDesk)]
+void asking_for_a_new_verification_link_mails_one_and_says_nothing_about_who_has_an_account() {
+  runas (AuthBootstrap) {
+    Assert.Equal("", RequestVerification("una@desk.test"));
+    Assert.Equal("", RequestVerification("nobody@desk.test"));
+    // A proven address is not asked again.
+    Assert.Equal("", RequestVerification("ada@desk.test"));
+  }
+  runas (AuthBootstrap) {
+    Assert.NotEqual("", TokenIn("una@desk.test", "/verify-email/"));
+    Assert.Equal(0, MailsTo("ada@desk.test", "Confirm your address"));
+    Assert.Equal(0, MailsTo("nobody@desk.test", "Confirm your address"));
+  }
+}

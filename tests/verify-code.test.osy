@@ -1,0 +1,180 @@
+// An address is proven by what its mail carries — a link AND a six-digit code, either one enough. With a proven address
+// required, sign-up issues no ticket until it is proven; and sign-up never says whether an address has an account — the
+// mail does.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void Signups() {
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+             EmailVerifiedAt = DateTime.UtcNow };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+
+void RequireProof() { AddressProofRequired.Stub(() => true); }
+
+[Test(Signups)]
+void the_verification_mail_carries_a_link_and_a_code_and_the_code_proves_the_address() {
+  runas (AuthBootstrap) { SignUp("new@desk.test", "a-long-password", "Nils"); }
+  string code = "";
+  string token = "";
+  runas (AuthBootstrap) { code = CodeIn("new@desk.test"); token = TokenIn("new@desk.test", "/verify-email/"); }
+  Assert.Equal(6, code.Length);
+  Assert.NotEqual("", token);
+  SignInStep step = new SignInStep();
+  // With the password the sign-up just chose, as the sign-up screen sends it (the first proof — tests/pre-hijack.test.osy).
+  runas (AuthBootstrap) { step = VerifyEmailCode("New@Desk.test ", code, "a-long-password"); }
+  // Receiving the mail is proof enough to be signed in, as a reset link is.
+  Assert.NotEqual("", step.Ticket);
+  runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "new@desk.test").EmailVerifiedAt); }
+  // …and the link that travelled with it is spent: the address is settled.
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail(token)); }
+}
+
+[Test(Signups)]
+void the_link_spends_the_code_that_travelled_with_it() {
+  runas (AuthBootstrap) { SignUp("new@desk.test", "a-long-password", "Nils"); }
+  string code = "";
+  string token = "";
+  runas (AuthBootstrap) { code = CodeIn("new@desk.test"); token = TokenIn("new@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { VerifyEmail(token, "a-long-password"); }
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmailCode("new@desk.test", code, "a-long-password")); }
+}
+
+[Test(Signups)]
+void with_a_proven_address_required_sign_up_issues_no_ticket_until_the_code() {
+  RequireProof();
+  SignInStep up = new SignInStep();
+  runas (AuthBootstrap) { up = SignUp("new@desk.test", "a-long-password", "Nils"); }
+  Assert.Equal("", up.Ticket);
+  Assert.True(up.MustVerify);
+  Assert.Equal("new@desk.test", up.Account);
+  // The right password does not get past it either…
+  SignInStep signIn = new SignInStep();
+  runas (AuthBootstrap) { signIn = SignIn("new@desk.test", "a-long-password"); }
+  Assert.Equal("", signIn.Ticket);
+  Assert.True(signIn.MustVerify);
+  // …the code does.
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("new@desk.test"); }
+  SignInStep proven = new SignInStep();
+  runas (AuthBootstrap) { proven = VerifyEmailCode("new@desk.test", code, "a-long-password"); }
+  Assert.NotEqual("", proven.Ticket);
+}
+
+[Test(Signups)]
+void an_account_the_app_names_proves_its_address_before_its_first_ticket_and_the_rest_sign_in_at_once() {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignUp("kim@contractor.test", "a-long-password", "Kim"); }
+  Assert.True(step.MustVerify);
+  Assert.Equal("", step.Ticket);
+  // Signing in with the right password, or signing up again with it, is still the step that proves the address.
+  runas (AuthBootstrap) { step = SignIn("kim@contractor.test", "a-long-password"); }
+  Assert.True(step.MustVerify);
+  Assert.Equal("", step.Ticket);
+  runas (AuthBootstrap) { step = SignUp("kim@contractor.test", "a-long-password", "Kim"); }
+  Assert.True(step.MustVerify);
+  Assert.Equal("", step.Ticket);
+  // A wrong code is a sentence and no ticket; the code the mail carried proves it and signs in.
+  runas (AuthBootstrap) { Assert.Throws<ValidationException>(() => VerifyEmailCode("kim@contractor.test", "000000", "a-long-password")); }
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("kim@contractor.test"); }
+  runas (AuthBootstrap) { step = VerifyEmailCode("kim@contractor.test", code, "a-long-password"); }
+  Assert.NotEqual("", step.Ticket);
+  // …and from then on, a sign-in is a sign-in.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("kim@contractor.test", "a-long-password").Ticket); }
+  // Everybody the app does not name signs up and in at once.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignUp("nils@desk.test", "a-long-password", "Nils").Ticket); }
+}
+
+[Test(Signups)]
+void with_a_proven_address_required_a_taken_address_is_answered_as_a_new_one_and_the_mail_says_which() {
+  RequireProof();
+  SignInStep taken = new SignInStep();
+  SignInStep fresh = new SignInStep();
+  runas (AuthBootstrap) { taken = SignUp("ada@desk.test", "any-long-password", "Somebody"); }
+  runas (AuthBootstrap) { fresh = SignUp("new@desk.test", "any-long-password", "Somebody"); }
+  // The same answer, field for field — the page cannot tell them apart.
+  Assert.Equal(fresh.MustVerify, taken.MustVerify);
+  Assert.Equal(fresh.Ticket, taken.Ticket);
+  Assert.Equal(fresh.Challenge, taken.Challenge);
+  Assert.Equal(fresh.MustEnrol, taken.MustEnrol);
+  Assert.True(taken.MustVerify);
+  runas (AuthBootstrap) {
+    // The mail says which: the owner of the taken address is told, and sent no code; the new address gets its code.
+    Assert.Equal(1, MailsTo("ada@desk.test", "You already have an account"));
+    Assert.Equal("", CodeIn("ada@desk.test"));
+    Assert.Equal(6, CodeIn("new@desk.test").Length);
+    // Nothing about Ada's account changed: one account, the old password.
+    Assert.Equal(1, User.Count(u => u.Email == "ada@desk.test"));
+  }
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignIn("ada@desk.test", "correct-horse-1").Ticket; }
+  Assert.NotEqual("", ticket);
+}
+
+[Test(Signups)]
+void a_taken_address_is_told_at_most_once_a_minute() {
+  RequireProof();
+  runas (AuthBootstrap) {
+    SignUp("ada@desk.test", "any-long-password", "Somebody");
+    SignUp("ada@desk.test", "any-long-password", "Somebody");
+  }
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("ada@desk.test", "You already have an account")); }
+}
+
+[Test(Signups)]
+void without_proof_required_the_right_password_on_a_taken_address_signs_its_owner_in() {
+  SignInStep own = new SignInStep();
+  runas (AuthBootstrap) { own = SignUp("ada@desk.test", "correct-horse-1", "Ada"); }
+  Assert.NotEqual("", own.Ticket);
+  // A wrong one is answered with the step a proof would need, and the owner is mailed — never "already an account".
+  SignInStep other = new SignInStep();
+  runas (AuthBootstrap) { other = SignUp("ada@desk.test", "a-different-secret", "Mallory"); }
+  Assert.Equal("", other.Ticket);
+  Assert.True(other.MustVerify);
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("ada@desk.test", "You already have an account")); }
+}
+
+[Test(Signups)]
+void a_code_dies_at_its_fifth_wrong_try() {
+  runas (AuthBootstrap) { SignUp("new@desk.test", "a-long-password", "Nils"); }
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("new@desk.test"); }
+  var wrong = code == "000000" ? "111111" : "000000";
+  for (var i = 0; i < 5; i++) {
+    runas (AuthBootstrap) { Assert.Throws(() => VerifyEmailCode("new@desk.test", wrong)); }
+  }
+  // The right code, now: the code is dead.
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmailCode("new@desk.test", code)); }
+  runas (AuthBootstrap) { Assert.Null(User.Single(u => u.Email == "new@desk.test").EmailVerifiedAt); }
+}
+
+[Test(Signups)]
+void a_code_lapses_after_fifteen_minutes() {
+  runas (AuthBootstrap) { SignUp("new@desk.test", "a-long-password", "Nils"); }
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("new@desk.test"); }
+  TestClock.Advance(TimeSpan.FromMinutes(16));
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmailCode("new@desk.test", code)); }
+}
+
+[Test(Signups)]
+void a_code_is_kept_only_as_a_keyed_fingerprint_and_nobody_signed_in_makes_one() {
+  runas (AuthBootstrap) { SignUp("new@desk.test", "a-long-password", "Nils"); }
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("new@desk.test"); }
+  runas (AuthBootstrap) {
+    var row = OneTimeCode.Single(c => c.Destination == "new@desk.test" && c.UsedAt == null);
+    Assert.NotEqual(code, row.CodeHash);
+    Assert.False(row.CodeHash.Contains(code));
+    // Not a plain hash either: the one an attacker with the table would try first.
+    Assert.NotEqual(Crypto.Sha256Hex(code), row.CodeHash);
+  }
+  runas (Ada) {
+    Assert.Denied(() => new OneTimeCode { Account = User.Single(u => u.Email == "ada@desk.test"), Destination = "ada@desk.test",
+                                          CodeHash = "known", Nonce = "n", ExpiresAt = DateTime.UtcNow.AddMinutes(5) });
+  }
+}

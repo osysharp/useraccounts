@@ -1,0 +1,100 @@
+// An address change somebody who looks after the app's people makes for a person — the desk helping somebody whose old
+// address is gone. The desk answers for the business and can see who is in front of it (an ID, a contract), so its
+// change applies at once; both addresses are told, and neither has to confirm anything.
+//
+// ⚑ THE DESK'S CHANGE APPLIES AT ONCE, AND IS NEVER SILENT. The person cannot open a link at an address they lost, and
+//   the desk answers for the business — so the account moves when the desk makes the change, with the REASON the desk
+//   gives ("ID checked at the desk") recorded beside who made it and when. Both addresses are told — the old one that
+//   the account moved, the new one that it is theirs now — and neither mail asks for anything to be clicked.
+// ⚑ THE PERSON'S OWN CHANGE IS UNCHANGED: `ChangeEmail` still mails a link to the new address and moves nothing until
+//   it is opened (an address is where a password is reset to, and a stranger with the password must not move it).
+// ⚑ WHO MAY MAKE ONE IS THE APP'S TO SAY — `ChangesAccountsFor`, nobody until the app answers it
+//   (`policy ChangesAccountsFor => IsDesk;`) — and a change is made only by `ChangeAddressFor`, which checks the address
+//   and the reason first (`deny create except via ChangeAddressFor`). The address itself is written by
+//   the change's run, never by the desk's own context (Osysharp.Identity's `deny update Email when !IsAuthenticator`).
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Mail;
+using Osysharp.Workflow;
+
+/// Who may move somebody else's account to a new address. Nobody, until the app says who
+/// (`policy ChangesAccountsFor => IsDesk;`).
+virtual policy ChangesAccountsFor => false;
+
+/// Where a desk's address change stands — tracked by `AssistedAddressChange`. ⚠ Appended, never inserted.
+public enum AddressChangeState {
+  [Label("Moving the account")] Moving,
+  [Label("Moved")] Moved,
+}
+
+/// A change of address somebody who looks after the app's people made for an account: the record of who moved it, when,
+/// from which address to which, and why. Its run moves the account and tells both addresses.
+///
+/// SECURITY-INVARIANT(accounts-a-staff-address-change-is-named-recorded-and-told): a change is made only by
+/// `ChangeAddressFor` — behind `[Authorize(ChangesAccountsFor)]`, which no caller satisfies until the app answers it, and
+/// refused without a reason — and nobody edits or removes one; the account moves only through its run, which writes the
+/// old address beside the new and mails BOTH (the old one: it moved, and by whose hand). So the desk can move an account
+/// for a person who lost their address, and never does so unrecorded, unexplained or unseen by the owner of the old
+/// address. Guarded by tests/assisted-change.test.osy.
+public entity AddressChangeRequest {
+  [Required] User Account;
+  /// The address the account moved to, normalised.
+  [Required, MaxLength(255)] string NewAddress;
+  /// The address it moved from — written by the run, as it moves it.
+  [MaxLength(255)] string OldAddress = "";
+  /// Why the desk made the change — "ID checked at the desk".
+  [Required, MaxLength(500)] string Reason;
+  /// Who made it, and when — written by the platform on commit, whatever the caller sent.
+  [CreatedBy] Guid? MadeBy;
+  [CreatedAt] DateTime MadeAt;
+  AddressChangeState State;                            // no default — AssistedAddressChange owns it
+  security {
+    allow read when IsAuthenticator || ChangesAccountsFor;
+    allow create when ChangesAccountsFor;
+    deny create except via ChangeAddressFor;
+  }
+}
+
+/// Move `account` to `newAddress` now, for its owner, giving `reason` ("ID checked at the desk"): the change is recorded
+/// with who made it, and both addresses are told — nothing to click. Throws the sentence to show for an address that is
+/// not one, is the account's own, or another account already uses, and for a change with no reason.
+[Server, Authorize(ChangesAccountsFor)]
+public void ChangeAddressFor(User account, string newAddress, string reason) {
+  var address = NormalisedEmail(newAddress);
+  if (!LooksLikeEmail(address)) { throw new ValidationException("That does not look like an email address."); }
+  if (address == account.Email) { throw new ValidationException("That is already the account's address."); }
+  if (Principal.Any(p => p.Email == address)) { throw new ValidationException("Another account already uses that address."); }
+  if (reason.Trim() == "") { throw new ValidationException("Say why the address is changed — how you know it is their account."); }
+  new AddressChangeRequest { Account = account, NewAddress = address, Reason = reason.Trim() };
+}
+
+/// Moves the account and tells both addresses — as the system, in the commit that made the change.
+public workflow AssistedAddressChange {
+  Tracks    = AddressChangeRequest.State;
+  Autostart = true;
+  Initial   = Moving;
+
+  state Moving {
+    enter {
+      var account = this.Item.Account;
+      var old = account.Email;
+      this.Item.OldAddress = old;
+      account.Email = this.Item.NewAddress;
+      // The desk vouched for the person, so the new address is not left waiting on a proof nobody asked for.
+      account.EmailVerifiedAt = DateTime.UtcNow;
+      // A change the person had asked for themselves, to some other address, would move it again when its link is
+      // opened: the desk's change spends it.
+      foreach (var pending in EmailCheck.Where(c => c.Account == account && c.IsChange && c.UsedAt == null).ToList()) {
+        pending.UsedAt = DateTime.UtcNow;
+      }
+      var mails = App.Setting<AccountsSetup>().Mails;
+      SendRendered(old, mails.AddressChangedFor(account, old, this.Item.NewAddress));
+      SendRendered(this.Item.NewAddress, mails.AddressMovedHere(account, old));
+      goto Moved;
+    }
+  }
+
+  terminal success Moved { }
+}

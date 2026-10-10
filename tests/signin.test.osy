@@ -1,0 +1,142 @@
+// Signing in, and signing up — through the kit's functions, as the sign-in flow runs them.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void Desk() {
+  var ada = new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+                       EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = ada, Role = AppRole.Member };
+  new Employee { Email = "eve@desk.test", DisplayName = "Eve", PasswordHash = Security.HashPassword("battery-staple-2"),
+                 Department = "Ops", EmailVerifiedAt = DateTime.UtcNow };
+  new User { Email = "gone@desk.test", DisplayName = "Gone", PasswordHash = Security.HashPassword("correct-horse-3"),
+             IsActive = false };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+principal Eve => User.Single(u => u.Email == "eve@desk.test");
+principal Nils => User.Single(u => u.Email == "new@desk.test");
+principal Fay => User.Single(u => u.Email == "founder@desk.test");
+principal Sid => User.Single(u => u.Email == "second@desk.test");
+
+[Test(Desk)]
+void signing_in_answers_a_ticket_and_records_when() {
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignIn("ada@desk.test", "correct-horse-1").Ticket; }
+  Assert.NotEqual("", ticket);
+  runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "ada@desk.test").LastLoginAt); }
+}
+
+[Test(Desk)]
+void the_address_is_matched_as_it_is_stored() {
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignIn("  ADA@Desk.test ", "correct-horse-1").Ticket; }
+  Assert.NotEqual("", ticket);
+}
+
+[Test(Desk)]
+void a_wrong_password_an_unknown_address_and_an_inactive_account_all_answer_nothing() {
+  string wrong = "x";
+  string unknown = "x";
+  string inactive = "x";
+  runas (AuthBootstrap) {
+    wrong = SignIn("ada@desk.test", "wrong-guess").Ticket;
+    unknown = SignIn("nobody@desk.test", "correct-horse-1").Ticket;
+    inactive = SignIn("gone@desk.test", "correct-horse-3").Ticket;
+  }
+  Assert.Equal("", wrong);
+  Assert.Equal("", unknown);
+  Assert.Equal("", inactive);
+}
+
+[Test(Desk)]
+void an_apps_own_kind_of_user_signs_in_through_the_kit() {
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignIn("eve@desk.test", "battery-staple-2").Ticket; }
+  Assert.NotEqual("", ticket);
+  runas (Eve) { Assert.True(AmEmployee()); }
+  runas (Ada) { Assert.False(AmEmployee()); }
+}
+
+[Test(Desk)]
+void signing_up_makes_an_account_signs_it_in_and_gives_it_the_apps_role() {
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignUp(" New@Desk.test", "a-long-password", "Nils").Ticket; }
+  Assert.NotEqual("", ticket);
+  runas (AuthBootstrap) { Assert.Equal("Nils", User.Single(u => u.Email == "new@desk.test").DisplayName); }
+  // A person reads their own roles (and nobody else's — not even the sign-in flow, which only grants them).
+  runas (Nils) {
+    Assert.True(RoleGrant.Any(g => g.Member == Nils && g.Role == AppRole.Member));
+    // …and not the first account's role: this desk already has accounts.
+    Assert.False(RoleGrant.Any(g => g.Member == Nils && g.Role == AppRole.Admin));
+  }
+}
+
+[Test]
+void the_first_account_ever_is_given_the_first_account_role_too() {
+  runas (AuthBootstrap) { SignUp("founder@desk.test", "a-long-password", "Fay"); }
+  runas (Fay) {
+    Assert.True(RoleGrant.Any(g => g.Member == Fay && g.Role == AppRole.Admin));
+    Assert.True(RoleGrant.Any(g => g.Member == Fay && g.Role == AppRole.Member));
+  }
+  runas (AuthBootstrap) { SignUp("second@desk.test", "a-long-password", "Sid"); }
+  runas (Sid) { Assert.False(RoleGrant.Any(g => g.Member == Sid && g.Role == AppRole.Admin)); }
+}
+
+/// The app is told of each role a sign-up gives (`RolesSetup.Events.Granted`), as it is of one the user manager or an
+/// invitation gives — by a run, as the system: `RoleTold` grants nobody a create, so a telling made as the sign-in flow
+/// would be refused and the sign-up with it.
+[Test]
+void a_sign_up_tells_the_app_of_each_role_it_is_given() {
+  runas (AuthBootstrap) { SignUp("founder@desk.test", "a-long-password", "Fay"); }
+  runas (Fay) {
+    Assert.True(RoleTold.Any(t => t.Member == Fay && t.Role == AppRole.Admin));
+    Assert.True(RoleTold.Any(t => t.Member == Fay && t.Role == AppRole.Member));
+  }
+  runas (AuthBootstrap) { SignUp("second@desk.test", "a-long-password", "Sid"); }
+  runas (Sid) {
+    Assert.True(RoleTold.Any(t => t.Member == Sid && t.Role == AppRole.Member));
+    Assert.False(RoleTold.Any(t => t.Member == Sid && t.Role == AppRole.Admin));
+  }
+}
+
+[Test(Desk)]
+void signing_up_mails_a_link_to_confirm_the_address() {
+  runas (AuthBootstrap) { SignUp("new@desk.test", "a-long-password", "Nils"); }
+  runas (AuthBootstrap) {
+    Assert.Equal(1, MailsTo("new@desk.test", "Confirm your address"));
+    Assert.NotEqual("", TokenIn("new@desk.test", "/verify-email/"));
+    Assert.Null(User.Single(u => u.Email == "new@desk.test").EmailVerifiedAt);
+  }
+}
+
+[Test(Desk)]
+void sign_up_refuses_a_short_password_and_a_non_address() {
+  // A TAKEN address is not refused — it is answered as a new one is, and its owner is mailed (verify-code.test.osy).
+  runas (AuthBootstrap) {
+    Assert.Throws(() => SignUp("short@desk.test", "short", "Shorty"));
+    Assert.Throws(() => SignUp("not-an-address", "a-long-password", "Who"));
+    Assert.Throws(() => SignUp("same@desk.test", "same@desk.test", "Same"));
+  }
+}
+
+[Test(Desk)]
+void sign_up_is_refused_when_the_app_closes_it() {
+  SignupIsOpen.Stub(() => false);
+  runas (AuthBootstrap) { Assert.Throws(() => SignUp("late@desk.test", "a-long-password", "Late")); }
+  runas (AuthBootstrap) { Assert.False(User.Any(u => u.Email == "late@desk.test")); }
+}
+
+[Test(Desk)]
+void sign_up_makes_the_apps_own_kind_of_account() {
+  runas (AuthBootstrap) { SignUp("new@desk.test", "a-long-password", "Nils"); }
+  runas (AuthBootstrap) {
+    var nils = Employee.Single(e => e.Email == "new@desk.test");
+    Assert.Equal("New starters", nils.Department);
+    Assert.Equal("Nils", nils.DisplayName);
+  }
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignIn("new@desk.test", "a-long-password").Ticket; }
+  Assert.NotEqual("", ticket);
+}

@@ -1,0 +1,864 @@
+// The forms — each a `[Composable]` an app can put on a page of its own, in any frame. Every colour, face and size is a
+// theme token, so an app's theme dresses them; the pages beside this file are these forms in a plain centred frame.
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Ui;
+
+/// The app's mark above every sign-in screen's heading: its logo (`AccountsSetup.LogoUrl`, or `logo` here) and its
+/// name. The setting puts the mark on every one of the kit's screens without taking a page over; an app page that
+/// frames a form itself passes `logo`.
+[Composable]
+public component AccountsBrand(string logo = "") {
+  AccountsFacts facts = new AccountsFacts();
+  on mount { facts = AccountsPageFacts(); }
+  render {
+    Stack(gap: 2, align: Align.Start) {
+      if (logo != "" || facts.LogoUrl != "") {
+        Image(logo != "" ? logo : facts.LogoUrl, alt: facts.AppName, h: "2.5rem", w: "auto", maxW: "12rem");
+      }
+      Text(facts.AppName, fontFamily: Font.Display, fontSize: FontSize.Label, fontWeight: FontWeight.Semibold,
+           color: Colors.Primary, letterSpacing: "0.04em");
+    }
+  }
+}
+
+/// A narrow centred column for the sign-in screens: the app's mark (`AccountsBrand` — its logo when it has one, and its
+/// name), a heading, a line under it, and the form. `logo` overrides `AccountsSetup.LogoUrl` for this frame.
+[Composable]
+public component AccountsFrame(string heading, string sub = "", string logo = "") {
+  render {
+    Row(align: Align.Center, justify: Justify.Center, minH: "100dvh", p: 4, bg: Colors.Bg, color: Colors.OnBg) {
+      Stack(gap: 4, w: "100%", maxW: "26rem") {
+        Stack(gap: 1) {
+          AccountsBrand(logo);
+          Text(heading, fontFamily: Font.Display, fontSize: FontSize.Title, fontWeight: FontWeight.Bold, lineHeight: "1.15");
+          if (sub != "") { Text(sub, color: Colors.TextMuted); }
+        }
+        Card() { Slot; }
+      }
+    }
+  }
+}
+
+/// Sign in — the password, then, for an account with two-step sign-in, a code; or, for an account the app requires it
+/// of and that has not set it up, setting it up. `then` is where to go afterwards when the visitor was not on their way
+/// somewhere. `email` and `password` prefill the fields (a demo's working account, say).
+[Composable]
+public component SignInForm(string then = "", string email = "", string password = "") {
+  AccountsFacts facts = new AccountsFacts();
+  on mount { facts = AccountsPageFacts(); }
+  string address = email;
+  string secret = password;
+  string problem = "";
+  string challenge = "";
+  string code = "";
+  bool enrolling = false;
+
+  string enrolment = "";
+  string challengeBy = "";
+  string texted = "";
+  bool proving = false;
+  bool byText = false;
+  string phone = "";
+  bool codeSent = false;
+
+  action Submit() {
+    problem = "";
+    try { Take(SignIn(address, secret)); }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  /// Whatever a sign-in answered: in, a code next, setting two-step sign-in up, or proving the address first.
+  action Take(SignInStep step) {
+    if (step.Ticket != "") { Session.SignIn(step.Ticket, then != "" ? then : facts.HomePath); return; }
+    if (step.MustEnrol) { enrolment = step.Enrolment; address = step.Account; enrolling = true; return; }
+    if (step.MustVerify) { proving = true; return; }
+    if (step.Challenge != "") { challenge = step.Challenge; challengeBy = step.ChallengeBy; texted = step.Account; code = ""; return; }
+    problem = "That address and password do not match an account.";
+  }
+
+  action SendText() {
+    problem = "";
+    try { var step = SignInWithPhone(phone); codeSent = step.CodeSent; code = ""; }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action SubmitTextedCode() {
+    problem = "";
+    try { Take(SignInWithPhone(phone, code)); }
+    catch (Exception ex) { problem = ex.Message; code = ""; }
+  }
+
+  action UseText() { problem = ""; byText = true; codeSent = false; code = ""; }
+
+  action ContinueWith(string provider) { Navigation.Open(ProviderSignInAddress(provider), sameTab: true); }
+
+  action SubmitCode() {
+    problem = "";
+    try {
+      var ticket = SignInWithCode(challenge, code);
+      if (ticket == "") { problem = "That code is not right — type the newest one your app shows."; code = ""; return; }
+      Session.SignIn(ticket, then != "" ? then : facts.HomePath);
+    }
+    catch (Exception ex) { problem = ex.Message; challenge = ""; secret = ""; }
+  }
+
+  action StartAgain() {
+    problem = ""; challenge = ""; code = ""; secret = ""; enrolling = false; enrolment = ""; proving = false;
+    byText = false; codeSent = false; challengeBy = "";
+  }
+
+  render {
+    Stack(gap: 3) {
+      if (enrolling) {
+        Alert($"{facts.AppName} asks for two-step sign-in on your account. Set it up now — it takes a minute.", tone: Tone.Default);
+        SecondFactorEnrolment(address, "", then != "" ? then : facts.HomePath, enrolment: enrolment);
+        Button("Back to sign in", onPress: StartAgain, tone: Tone.Ghost);
+      } else if (proving) {
+        // The password the sign-in just verified goes with the code — so its owner is not asked for it again.
+        AddressCodeStep(address, then != "" ? then : facts.HomePath, password: secret);
+        Button("Back to sign in", onPress: StartAgain, tone: Tone.Ghost);
+      } else if (challenge != "") {
+        if (challengeBy == "sms") {
+          Text($"We have texted a six-digit code to your phone ({texted}). Type it here — it works for fifteen minutes.", color: Colors.TextMuted);
+          Field("Code", value: code, placeholder: "123 456", onEnter: SubmitCode);
+        } else {
+          Text("Open your authenticator app and type the six-digit code it shows for this account.", color: Colors.TextMuted);
+          Field("Code", value: code, placeholder: "123 456", onEnter: SubmitCode,
+                hint: "Lost your phone? Type one of your recovery codes instead.");
+        }
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        Button("Continue", onPress: SubmitCode, tone: Tone.Primary, size: Size.Lg);
+        Button("Start again", onPress: StartAgain, tone: Tone.Ghost);
+      } else if (byText) {
+        Field("Phone number", value: phone, type: "tel", placeholder: "+46 70 123 45 67", onEnter: SendText,
+              hint: "The number on your account, with its country code.");
+        if (codeSent) {
+          Text("If that number may sign in here, a six-digit code is on its way. It works for fifteen minutes.", color: Colors.TextMuted);
+          Field("Code from the text", value: code, placeholder: "123 456", onEnter: SubmitTextedCode);
+        }
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        if (codeSent) { Button("Sign in", onPress: SubmitTextedCode, tone: Tone.Primary, size: Size.Lg); }
+        else { Button("Text me a code", onPress: SendText, tone: Tone.Primary, size: Size.Lg); }
+        Button("Sign in with a password instead", onPress: StartAgain, tone: Tone.Ghost);
+      } else {
+        Field("Email", value: address, type: "email", placeholder: "you@example.com", onEnter: Submit);
+        Field("Password", value: secret, type: "password", onEnter: Submit);
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        Button("Sign in", onPress: Submit, tone: Tone.Primary, size: Size.Lg);
+        if (facts.Providers.Count > 0) {
+          Stack(gap: 2) {
+            Text("or", color: Colors.TextMuted, fontSize: FontSize.Label, textAlign: TextAlign.Center);
+            foreach (var p in facts.Providers) {
+              Button($"Continue with {p}", onPress: () => ContinueWith(p), size: Size.Lg);
+            }
+          }
+        }
+        if (facts.SmsSignIn) { Button("Sign in with a text message", onPress: UseText, tone: Tone.Ghost); }
+        Row(gap: 4, wrap: Wrapping.Wrap) {
+          if (facts.SignupOpen) { TextLink("Create an account", to: "/sign-up"); }
+          TextLink("Forgot your password?", to: "/forgot-password", tone: Tone.Default);
+        }
+      }
+    }
+  }
+}
+
+/// Setting up two-step sign-in: the QR code and the key for an authenticator app, a first code to prove the app took it,
+/// and then the recovery codes — shown once. Signs in (to `then`) when the person has saved them. `email` and `password`
+/// are the account's: this runs as the sign-in flow, which proves who is asking by them — or, straight after a sign-in
+/// that answered `MustEnrol`, by its `enrolment` token instead of the password.
+[Composable]
+public component SecondFactorEnrolment(string email, string password, string then, string enrolment = "") {
+  SecondFactorSetup setup = new SecondFactorSetup();
+  string code = "";
+  string problem = "";
+  string ticket = "";
+  List<string> codes = [];
+
+  on mount { setup = NewSecondFactorSetup(email); }
+
+  action Confirm() {
+    problem = "";
+    try {
+      var on = EnableSecondFactor(email, password, setup.Key, code, enrolment);
+      codes = on.RecoveryCodes;
+      ticket = on.Ticket;
+    }
+    catch (Exception ex) { problem = ex.Message; code = ""; }
+  }
+
+  action Done() { Session.SignIn(ticket, then); }
+
+  render {
+    Stack(gap: 3) {
+      if (codes.Count == 0) {
+        Text("1. Scan this with an authenticator app — Google Authenticator, Microsoft Authenticator, 1Password, or any other.");
+        if (setup.Qr.Count > 0) { AccountsQrCode(setup.Qr); }
+        Stack(gap: 1) {
+          Text("Or type this key into the app:", fontSize: FontSize.Label, color: Colors.TextMuted);
+          Text(KeyInGroups(setup.Key), fontFamily: Font.Mono, fontWeight: FontWeight.Semibold, letterSpacing: "0.04em");
+        }
+        Text("2. Type the six-digit code the app now shows.");
+        Field("Code from the app", value: code, placeholder: "123 456", onEnter: Confirm);
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        Button("Turn on two-step sign-in", onPress: Confirm, tone: Tone.Primary, size: Size.Lg);
+      } else {
+        Alert("Two-step sign-in is on.", tone: Tone.Success);
+        RecoveryCodeList(codes);
+        Button("I have saved them — continue", onPress: Done, tone: Tone.Primary, size: Size.Lg);
+      }
+    }
+  }
+}
+
+/// A fresh set of recovery codes, and what they are for. They are shown once: only their fingerprints are kept.
+[Composable]
+public component RecoveryCodeList(List<string> codes) {
+  render {
+    Stack(gap: 2) {
+      Text("Your recovery codes", fontWeight: FontWeight.Semibold);
+      Text("If you lose your phone, each of these signs you in once. Save them somewhere safe — a password manager, or on paper. This is the only time they are shown.",
+           color: Colors.TextMuted);
+      Box(bg: Colors.Muted, rounded: Radius.Md, p: 3) {
+        Stack(gap: 1) {
+          foreach (var c in codes) { Text(c, fontFamily: Font.Mono, letterSpacing: "0.06em"); }
+        }
+      }
+    }
+  }
+}
+
+/// A QR code's rows (`Qr.Encode`) drawn as modules — dark on white whatever the theme, with a quiet margin of four
+/// modules: a reader looks for dark squares on a light ground, so this is the one place the screens do not take the
+/// theme's colours.
+[Composable]
+public component AccountsQrCode(List<string> rows, int module = 4) {
+  render {
+    Box(bg: "#ffffff", p: $"{module * 4}px", w: "fit-content", maxW: "100%", rounded: Radius.Md,
+        label: "QR code for your authenticator app") {
+      Stack(gap: 0) {
+        foreach (var row in rows) {
+          Row(gap: 0, h: $"{module}px") {
+            foreach (var run in QrRuns(row)) {
+              Box(w: $"{Math.Abs(run) * module}px", h: $"{module}px", shrink: 0, bg: run > 0 ? "#111111" : "#ffffff");
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// A row of QR modules as its runs, left to right: a dark run's length positive, a light one's negative.
+List<int> QrRuns(string row) {
+  List<int> runs = [];
+  var i = 0;
+  while (i < row.Length) {
+    var c = row.Substring(i, 1);
+    var j = i;
+    while (j < row.Length && row.Substring(j, 1) == c) { j = j + 1; }
+    runs.Add(c == "1" ? j - i : i - j);
+    i = j;
+  }
+  return runs;
+}
+
+/// A key in groups of four, as it is easiest to read off a screen and type (the app ignores the spaces).
+string KeyInGroups(string key) {
+  var groups = new List<string>();
+  var i = 0;
+  while (i < key.Length) {
+    groups.Add(key.Substring(i, Math.Min(4, key.Length - i)));
+    i = i + 4;
+  }
+  return string.Join(" ", groups);
+}
+
+/// Make an account — and be signed in to it. When sign-up is closed it says so instead.
+[Composable]
+public component SignUpForm(string then = "") {
+  AccountsFacts facts = new AccountsFacts();
+  on mount { facts = AccountsPageFacts(); }
+  string name = "";
+  string email = "";
+  string password = "";
+  string problem = "";
+  bool enrolling = false;
+  string enrolment = "";
+  bool proving = false;
+  string challenge = "";
+
+  action Submit() {
+    problem = "";
+    try {
+      var step = SignUp(email, password, name);
+      if (step.MustEnrol) { enrolment = step.Enrolment; enrolling = true; return; }
+      // The same answer for a new address and a taken one: the mail says which.
+      if (step.MustVerify) { email = step.Account; proving = true; return; }
+      // The address and password of an existing account: its owner, signed in as a sign-in would — a code may be next.
+      if (step.Challenge != "") { challenge = step.Challenge; return; }
+      Session.SignIn(step.Ticket, then != "" ? then : facts.HomePath);
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  render {
+    Stack(gap: 3) {
+      if (enrolling) {
+        Alert($"Your account is made. {facts.AppName} asks for two-step sign-in on it — set it up now, and you are in.", tone: Tone.Default);
+        SecondFactorEnrolment(email, "", then != "" ? then : facts.HomePath, enrolment: enrolment);
+      } else if (proving) {
+        // The password just chosen goes with the code: the person who signed up is not asked for it twice.
+        AddressCodeStep(email, then != "" ? then : facts.HomePath, password: password);
+      } else if (challenge != "") {
+        SecondFactorCodeStep(challenge, then != "" ? then : facts.HomePath);
+      } else if (!facts.SignupOpen) {
+        Alert($"{facts.AppName} is not open for sign-up. Ask the person who runs it for an account.", tone: Tone.Default);
+        TextLink("I have an account — sign in", to: "/login");
+      } else {
+        Field("Your name", value: name, placeholder: "How colleagues see you");
+        Field("Email", value: email, type: "email", placeholder: "you@example.com");
+        Field("Password", value: password, type: "password", onEnter: Submit,
+              hint: $"At least {facts.MinPasswordLength} characters.");
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        Button("Create account", onPress: Submit, tone: Tone.Primary, size: Size.Lg);
+        TextLink("I already have an account", to: "/login");
+      }
+    }
+  }
+}
+
+/// Proving an address with the code its mail carried — what sign-up and sign-in show when the app requires a proven address.
+/// Says the same whether or not the address has an account: the mail says which (a code, or "you already have an account").
+/// Then whatever a sign-in answers next — in, a code from an authenticator, or setting one up. `password` is the one the
+/// sign-up or sign-in screen just took: it goes with the code, so the account's first proof (which needs it — see
+/// `VerifyEmailCode`) does not ask for it again. Without it, the first proof asks for it or for a new one.
+[Composable]
+public component AddressCodeStep(string address, string then, string password = "") {
+  string code = "";
+  string problem = "";
+  SignInStep next = new SignInStep();
+  bool resent = false;
+
+  action Confirm() {
+    problem = "";
+    try {
+      next = VerifyEmailCode(address, code, password);
+      if (next.Ticket != "") { Session.SignIn(next.Ticket, then); }
+    }
+    catch (Exception ex) { problem = ex.Message; code = ""; }
+  }
+
+  action Resend() { RequestVerification(address); resent = true; }
+
+  render {
+    Stack(gap: 3) {
+      if (next.MustConfirmPassword) {
+        ConfirmPasswordStep("", address, code, then);
+      } else if (next.MustEnrol) {
+        SecondFactorEnrolment(address, "", then, enrolment: next.Enrolment);
+      } else if (next.Challenge != "") {
+        SecondFactorCodeStep(next.Challenge, then);
+      } else {
+        Alert($"Check your mail at {address}. It says what comes next — a six-digit code to type here, or a link to open.", tone: Tone.Default);
+        Field("Code from the mail", value: code, placeholder: "123 456", onEnter: Confirm);
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        Button("Confirm", onPress: Confirm, tone: Tone.Primary, size: Size.Lg);
+        if (resent) { Text("If a new code was due, it is on its way.", color: Colors.TextMuted, fontSize: FontSize.Label); }
+        else { Button("Send a new code", onPress: Resend, tone: Tone.Ghost); }
+      }
+    }
+  }
+}
+
+/// Ask for a reset link. Says the same whether or not the address has an account.
+[Composable]
+public component ForgotPasswordForm() {
+  string email = "";
+  bool sent = false;
+
+  action Submit() { RequestPasswordReset(email); sent = true; }
+
+  render {
+    Stack(gap: 3) {
+      if (sent) {
+        Alert($"If there is an account for {email}, a link to choose a new password is on its way. It works once, for an hour.",
+              tone: Tone.Success);
+      } else {
+        Field("Email", value: email, type: "email", placeholder: "you@example.com", onEnter: Submit);
+        Button("Email me a link", onPress: Submit, tone: Tone.Primary, size: Size.Lg);
+      }
+      TextLink("Back to sign in", to: "/login", tone: Tone.Default);
+    }
+  }
+}
+
+/// Choose a new password with the token a reset mail carried — and be signed in.
+[Composable]
+public component ResetPasswordForm(string token) {
+  AccountsFacts facts = new AccountsFacts();
+  on mount { facts = AccountsPageFacts(); }
+  string password = "";
+  string again = "";
+  string problem = "";
+  bool changed = false;
+
+  action Submit() {
+    problem = "";
+    if (password != again) { problem = "The two passwords are not the same."; return; }
+    try {
+      var ticket = ResetPassword(token, password);
+      // An account with two-step sign-in gets no ticket from a mailed link — it signs in with the new password and a code.
+      if (ticket == "") { changed = true; return; }
+      Session.SignIn(ticket, facts.HomePath);
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  render {
+    Stack(gap: 3) {
+      if (changed) {
+        Alert("Your password is changed. Sign in with it now — two-step sign-in comes next.", tone: Tone.Success);
+        TextLink("Sign in", to: "/login");
+      } else {
+        Field("New password", value: password, type: "password",
+              hint: $"At least {facts.MinPasswordLength} characters.");
+        Field("The same again", value: again, type: "password", onEnter: Submit);
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        Button("Save and sign in", onPress: Submit, tone: Tone.Primary, size: Size.Lg);
+        TextLink("Ask for a new link", to: "/forgot-password", tone: Tone.Default);
+      }
+    }
+  }
+}
+
+/// What a verification link opens: it proves the address, and says so — or, on an account's first proof, asks for the
+/// password it was made with or a new one (`ConfirmPasswordStep`).
+[Composable]
+public component VerifyEmailResult(string token) {
+  AccountsFacts facts = new AccountsFacts();
+  SignInStep step = new SignInStep();
+  string problem = "";
+  bool done = false;
+
+  on mount {
+    facts = AccountsPageFacts();
+    try { step = VerifyEmail(token); }
+    catch (Exception ex) { problem = ex.Message; }
+    done = true;
+  }
+
+  render {
+    Stack(gap: 3) {
+      if (!done) { Text("Confirming…", color: Colors.TextMuted); }
+      else if (problem == "" && step.MustConfirmPassword) {
+        ConfirmPasswordStep(token, step.Account, "", facts.HomePath);
+      } else if (problem == "") {
+        Alert($"{step.Account} is confirmed.", tone: Tone.Success);
+        TextLink("Continue", to: facts.HomePath);
+      } else {
+        Alert(problem, tone: Tone.Danger);
+        TextLink("Sign in", to: "/login");
+      }
+    }
+  }
+}
+
+/// The first proof of an address on an account that already has a password (`SignInStep.MustConfirmPassword`): whoever
+/// made the account types the password they chose; whoever did not — or has forgotten it — chooses a new one, and the
+/// account becomes theirs with every other way into it closed (SECURITY-INVARIANT accounts-first-proof-claims-the-account).
+/// The proof is the link's `token`, or the `address` and the `code` its mail carried.
+[Composable]
+public component ConfirmPasswordStep(string token, string address, string code, string then) {
+  AccountsFacts facts = new AccountsFacts();
+  on mount { facts = AccountsPageFacts(); }
+  string password = "";
+  string fresh = "";
+  string again = "";
+  string problem = "";
+  bool choosing = false;
+  SignInStep next = new SignInStep();
+
+  action Finish(string current, string chosen) {
+    problem = "";
+    try {
+      next = token != "" ? VerifyEmail(token, current, chosen) : VerifyEmailCode(address, code, current, chosen);
+      if (next.Ticket != "") { Session.SignIn(next.Ticket, then); }
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action Confirm() { Finish(password, ""); }
+
+  action Choose() {
+    if (fresh != again) { problem = "The two passwords are not the same."; return; }
+    Finish("", fresh);
+  }
+
+  action ChooseInstead() { problem = ""; choosing = true; }
+
+  render {
+    Stack(gap: 3) {
+      if (next.MustEnrol) {
+        SecondFactorEnrolment(address, "", then, enrolment: next.Enrolment);
+      } else if (next.Challenge != "") {
+        SecondFactorCodeStep(next.Challenge, then);
+      } else if (choosing) {
+        Text($"Choose a password for {address}. The account becomes yours: any password, two-step sign-in, phone or other sign-in set up on it before is removed.",
+             color: Colors.TextMuted);
+        Field("New password", value: fresh, type: "password", hint: $"At least {facts.MinPasswordLength} characters.");
+        Field("The same again", value: again, type: "password", onEnter: Choose);
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        Button("Save and sign in", onPress: Choose, tone: Tone.Primary, size: Size.Lg);
+      } else {
+        Text($"{address} receives mail, and the account for it was made before that was confirmed. If you made it, type the password you chose.",
+             color: Colors.TextMuted);
+        Field("Your password", value: password, type: "password", onEnter: Confirm);
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        Button("Confirm and sign in", onPress: Confirm, tone: Tone.Primary, size: Size.Lg);
+        Button("I did not make this account, or forgot its password", onPress: ChooseInstead, tone: Tone.Ghost);
+      }
+    }
+  }
+}
+
+/// A signed-in person's sign-in details: their address and whether it is confirmed, a new password, a new address, and
+/// two-step sign-in. Every change asks for the current password — and, with two-step sign-in on, a current code: see the
+/// notes in SignIn.osy and SecondFactor.osy.
+[Composable]
+public component AccountSettings() {
+  AccountsFacts facts = new AccountsFacts();
+  SecondFactorFacts twoStep = new SecondFactorFacts();
+  on mount { facts = AccountsPageFacts(); twoStep = MySecondFactor(); }
+  var me = Session.CurrentUser;
+  string current = "";
+  string code = "";
+  string newPassword = "";
+  string newEmail = "";
+  string note = "";
+  string problem = "";
+  bool enrolling = false;
+  List<string> codes = [];
+  ProviderFacts providers = new ProviderFacts();
+  on mount { providers = MyProviders(); }
+  PhoneFacts phone = new PhoneFacts();
+  on mount { phone = MyPhone(); }
+  string newPhone = "";
+  string textedCode = "";
+  bool phoneCodeSent = false;
+  bool stepOffCodeSent = false;
+
+  action SendPhoneCode() {
+    note = ""; problem = "";
+    try { ProvePhone(Session.CurrentUser.Email, current, newPhone); phoneCodeSent = true; textedCode = ""; }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action ConfirmPhone() {
+    note = ""; problem = "";
+    try {
+      ProvePhone(Session.CurrentUser.Email, current, newPhone, textedCode, code);
+      phone = MyPhone(); phoneCodeSent = false; textedCode = ""; code = ""; newPhone = "";
+      note = $"Your number {phone.Number} is confirmed.";
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action RemovePhone() {
+    note = ""; problem = "";
+    try { ProvePhone(Session.CurrentUser.Email, current, "", "", code); phone = MyPhone(); code = ""; note = "Your phone number is removed."; }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action TextedStepOn() {
+    note = ""; problem = "";
+    try { SetSmsSecondStep(Session.CurrentUser.Email, current, true); phone = MyPhone(); note = "Signing in now asks for a code texted to your phone."; }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action TextedStepOff() {
+    note = ""; problem = "";
+    try {
+      var answer = SetSmsSecondStep(Session.CurrentUser.Email, current, false, textedCode);
+      if (answer == "sent") { stepOffCodeSent = true; textedCode = ""; return; }
+      phone = MyPhone(); stepOffCodeSent = false; textedCode = ""; note = "Texted sign-in codes are off.";
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action LinkWith(string provider) { Navigation.Open(ProviderSignInAddress(provider), sameTab: true); }
+
+  action Unlink(string provider) {
+    note = ""; problem = "";
+    try {
+      UnlinkProvider(Session.CurrentUser.Email, current, provider, code);
+      code = "";
+      providers = MyProviders();
+      note = $"{provider} no longer signs in to your account.";
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action SavePassword() {
+    note = ""; problem = "";
+    // The session stays signed in: its ticket is still good, and moving the page under the person would lose the note.
+    try {
+      ChangePassword(Session.CurrentUser.Email, current, newPassword, code);
+      current = ""; newPassword = ""; code = ""; note = "Your password is changed.";
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action StartTwoStep() {
+    note = ""; problem = "";
+    if (current == "") { problem = "Type your current password first — setting up two-step sign-in asks for it."; return; }
+    enrolling = true;
+  }
+
+  action NewCodes() {
+    note = ""; problem = "";
+    try { codes = NewRecoveryCodes(Session.CurrentUser.Email, current, code); code = ""; twoStep = MySecondFactor(); }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action TurnOff() {
+    note = ""; problem = "";
+    try {
+      DisableSecondFactor(Session.CurrentUser.Email, current, code);
+      code = ""; codes = [];
+      twoStep = MySecondFactor();
+      // An account that must use it moves to another phone this way: off, then set up again at once.
+      if (twoStep.Required) { enrolling = true; } else { note = "Two-step sign-in is off."; current = ""; }
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  action MoveAddress() {
+    note = ""; problem = "";
+    try {
+      ChangeEmail(Session.CurrentUser.Email, current, newEmail, code);
+      note = newEmail.Trim().ToLower() == me.Email
+        ? $"A new link to confirm {me.Email} is on its way."
+        : $"We have sent a link to {newEmail}. Your account moves to it when you open it.";
+      current = ""; code = "";
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  render {
+    Stack(gap: 4) {
+      if (me != null) {
+        Stack(gap: 1) {
+          Text(me.Email, fontWeight: FontWeight.Semibold);
+          if (me.EmailVerifiedAt == null) { Badge("Not confirmed", tone: Tone.Warning); }
+          else { Badge("Confirmed", tone: Tone.Success); }
+        }
+        Field("Current password", value: current, type: "password", hint: "Needed for every change below.");
+        if (twoStep.On) {
+          Field("Code from your app", value: code, placeholder: "123 456",
+                hint: "Needed too, with two-step sign-in on. A recovery code works as well.");
+        }
+        Divider();
+        Field("New password", value: newPassword, type: "password",
+              hint: $"At least {facts.MinPasswordLength} characters.");
+        Button("Change password", onPress: SavePassword);
+        Divider();
+        Field("New address", value: newEmail, type: "email", hint: "Or your own address, to have a new confirmation link sent.");
+        Button("Change address", onPress: MoveAddress);
+        Divider();
+        Stack(gap: 2) {
+          Row(gap: 2, align: Align.Center) {
+            Text("Two-step sign-in", fontWeight: FontWeight.Semibold);
+            if (twoStep.On) { Badge("On", tone: Tone.Success); } else { Badge("Off", tone: Tone.Default); }
+          }
+          if (enrolling) {
+            SecondFactorEnrolment(me.Email, current, "/account");
+          } else if (!twoStep.On) {
+            Text("After your password, signing in asks for a code from an authenticator app on your phone — so a stolen password is not enough.",
+                 color: Colors.TextMuted);
+            if (twoStep.Required) { Alert($"{facts.AppName} asks for two-step sign-in on your account.", tone: Tone.Warning); }
+            Button("Set up two-step sign-in", onPress: StartTwoStep);
+          } else {
+            Text($"Signing in asks for a code from your app. {twoStep.RecoveryCodesLeft} recovery codes left.", color: Colors.TextMuted);
+            Row(gap: 2, wrap: Wrapping.Wrap) {
+              Button("New recovery codes", onPress: NewCodes);
+              Button(twoStep.Required ? "Move to another phone" : "Turn off two-step sign-in", onPress: TurnOff);
+            }
+            if (codes.Count > 0) { RecoveryCodeList(codes); }
+          }
+        }
+        if (facts.Phones) {
+          Divider();
+          Stack(gap: 2) {
+            Row(gap: 2, align: Align.Center) {
+              Text("Phone", fontWeight: FontWeight.Semibold);
+              if (phone.Proven) { Badge("Confirmed", tone: Tone.Success); }
+            }
+            if (phone.Proven) { Text(phone.Number); }
+            Field(phone.Proven ? "New number" : "Phone number", value: newPhone, type: "tel", placeholder: "+46 70 123 45 67",
+                  hint: "With its country code. We text it a code to confirm it is yours.");
+            if (phoneCodeSent) {
+              Field("Code from the text", value: textedCode, placeholder: "123 456", onEnter: ConfirmPhone);
+              Button("Confirm number", onPress: ConfirmPhone, tone: Tone.Primary);
+            } else {
+              Button("Text me a code", onPress: SendPhoneCode);
+            }
+            if (phone.Proven && !phone.SecondStep) { Button("Remove the number", onPress: RemovePhone, tone: Tone.Ghost); }
+            if (facts.SmsSecondStep && phone.Proven && !twoStep.On) {
+              if (phone.SecondStep) {
+                Text("Signing in asks for a code texted to this number after your password.", color: Colors.TextMuted);
+                if (stepOffCodeSent) {
+                  Field("Code from the text", value: textedCode, placeholder: "123 456", onEnter: TextedStepOff);
+                  Button("Turn off texted codes", onPress: TextedStepOff);
+                } else {
+                  Button("Turn off texted codes", onPress: TextedStepOff);
+                }
+              } else {
+                Text("Or have a code texted to this number each time you sign in. An authenticator app is stronger — a number can be moved to somebody else's SIM.",
+                     color: Colors.TextMuted);
+                Button("Text me a code when I sign in", onPress: TextedStepOn);
+              }
+            }
+          }
+        }
+        if (providers.Offered.Count > 0) {
+          Divider();
+          Stack(gap: 2) {
+            Text("Sign in with", fontWeight: FontWeight.Semibold);
+            foreach (var p in providers.Offered) {
+              Row(gap: 2, align: Align.Center, wrap: Wrapping.Wrap) {
+                Text(p, grow: 1);
+                if (providers.Linked.Contains(p)) {
+                  Badge("Linked", tone: Tone.Success);
+                  Button("Unlink", onPress: () => Unlink(p), size: Size.Sm);
+                } else {
+                  Button($"Link {p}", onPress: () => LinkWith(p), size: Size.Sm);
+                }
+              }
+            }
+            Text("Unlinking asks for your current password. Signed up with a provider and have none? Choose one with a link from the sign-in page's \"Forgot your password?\".",
+                 color: Colors.TextMuted, fontSize: FontSize.Label);
+          }
+        }
+        if (note != "") { Alert(note, tone: Tone.Success); }
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+      }
+    }
+  }
+}
+
+/// The code step of a sign-in: the authenticator app's six digits (or a recovery code) for `challenge`, then signed in
+/// to `then`. "Start again" goes back to the sign-in page.
+[Composable]
+public component SecondFactorCodeStep(string challenge, string then) {
+  string code = "";
+  string problem = "";
+  bool spent = false;
+
+  action SubmitCode() {
+    problem = "";
+    try {
+      var ticket = SignInWithCode(challenge, code);
+      if (ticket == "") { problem = "That code is not right — type the newest one your app shows."; code = ""; return; }
+      Session.SignIn(ticket, then);
+    }
+    catch (Exception ex) { problem = ex.Message; spent = true; }
+  }
+
+  render {
+    Stack(gap: 3) {
+      if (!spent) {
+        Text("Open your authenticator app and type the six-digit code it shows for this account.", color: Colors.TextMuted);
+        Field("Code", value: code, placeholder: "123 456", onEnter: SubmitCode,
+              hint: "Lost your phone? Type one of your recovery codes instead.");
+      }
+      if (problem != "") { Alert(problem, tone: Tone.Danger); }
+      if (!spent) { Button("Continue", onPress: SubmitCode, tone: Tone.Primary, size: Size.Lg); }
+      TextLink("Start again", to: "/login", tone: Tone.Default);
+    }
+  }
+}
+
+/// Where a provider sign-in lands (`/oauth/sign-in`): the platform hands the page a sealed token in its address, and
+/// this finishes the sign-in with it — a code next, setting two-step sign-in up, or straight in. For a person already
+/// signed in it LINKS the provider to their account instead, after their password (and a code, with two-step sign-in on).
+/// `then` is where to go afterwards; the account page when linking. `ownDoor`: when the provider verified somebody with
+/// no account here and the app is closed to sign-up (`NoAccount`), show the SLOT — the app's own way in, an application
+/// form say, which reads the same `pending_oauth` token from the address — instead of saying there is no account.
+[Composable]
+public component ProviderSignIn(string then = "", bool ownDoor = false) {
+  AccountsFacts facts = new AccountsFacts();
+  live var pendingToken = Text.Split(Navigation.Hash, "pending_oauth=").Count > 1
+    ? Text.Split(Navigation.Hash, "pending_oauth=")[1]
+    : "";
+  var me = Session.CurrentUser;
+  ProviderIdentity who = new ProviderIdentity();
+  SignInStep step = new SignInStep();
+  string problem = "";
+  bool done = false;
+  bool noAccount = false;
+  string password = "";
+  string code = "";
+  bool linked = false;
+
+  on mount {
+    facts = AccountsPageFacts();
+    who = ProviderIdentityOf(pendingToken);
+    if (me == null) {
+      try {
+        step = SignInWithProvider(pendingToken);
+        if (step.Ticket != "") { Session.SignIn(step.Ticket, then != "" ? then : facts.HomePath); }
+        else if (step.NoAccount) { noAccount = true; }
+        else if (!step.MustEnrol && step.Challenge == "") { problem = "That sign-in did not match an account that may sign in here."; }
+      }
+      catch (Exception ex) { problem = ex.Message; }
+    }
+    done = true;
+  }
+
+  action Link() {
+    problem = "";
+    try {
+      LinkProvider(Session.CurrentUser.Email, password, pendingToken, code);
+      linked = true; password = ""; code = "";
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  render {
+    Stack(gap: 3) {
+      if (!done) { Text("Signing you in…", color: Colors.TextMuted); }
+      else if (me != null) {
+        if (linked) {
+          Alert($"{who.Provider} now signs in to your account.", tone: Tone.Success);
+          TextLink("Back to your account", to: "/account");
+        } else {
+          Text($"Link the {who.Provider} account {who.Email} to your account, {me.Email}, so it signs you in from now on.");
+          Field("Current password", value: password, type: "password", onEnter: Link);
+          Field("Code from your app", value: code, placeholder: "123 456",
+                hint: "Only when two-step sign-in is on — a recovery code works as well.");
+          if (problem != "") { Alert(problem, tone: Tone.Danger); }
+          Button($"Link {who.Provider}", onPress: Link, tone: Tone.Primary, size: Size.Lg);
+          TextLink("Back to your account", to: "/account", tone: Tone.Default);
+        }
+      }
+      else if (step.MustEnrol) {
+        Alert($"{facts.AppName} asks for two-step sign-in on your account. Set it up now — it takes a minute.", tone: Tone.Default);
+        SecondFactorEnrolment(step.Account, "", then != "" ? then : facts.HomePath, enrolment: step.Enrolment);
+      }
+      else if (step.Challenge != "") { SecondFactorCodeStep(step.Challenge, then != "" ? then : facts.HomePath); }
+      else if (noAccount && ownDoor) { Slot; }
+      else if (noAccount) {
+        Alert($"There is no account for {step.Account} here, and {facts.AppName} is not open for sign-up. Ask the person who runs it for an account.",
+              tone: Tone.Default);
+        TextLink("Back to sign in", to: "/login");
+      }
+      else if (problem != "") {
+        Alert(problem, tone: Tone.Danger);
+        TextLink("Back to sign in", to: "/login");
+      }
+    }
+  }
+}

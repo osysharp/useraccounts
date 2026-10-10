@@ -1,0 +1,124 @@
+// An address is proven by a message it receives — verified, and changed only from the new address's own link.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void People() {
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1") };
+  new User { Email = "bo@desk.test", DisplayName = "Bo", PasswordHash = Security.HashPassword("correct-horse-2"),
+             EmailVerifiedAt = DateTime.UtcNow };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+
+[Test(People)]
+void opening_the_link_proves_the_address() {
+  runas (AuthBootstrap) { SignIn("ada@desk.test", "correct-horse-1"); }   // an unproven account is sent a link
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/verify-email/"); }
+  Assert.NotEqual("", token);
+  // Ada's account had its password before its address was proven, so the link proves it WITH that password (her first
+  // proof — tests/pre-hijack.test.osy); proven, and signed in as a sign-in would be.
+  SignInStep proven = new SignInStep();
+  runas (AuthBootstrap) { proven = VerifyEmail(token, "correct-horse-1"); }
+  Assert.NotEqual("", proven.Ticket);
+  runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "ada@desk.test").EmailVerifiedAt); }
+  // Once only.
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail(token)); }
+}
+
+[Test(People)]
+void signing_in_again_does_not_mail_a_second_link_while_the_first_is_live() {
+  runas (AuthBootstrap) { SignIn("ada@desk.test", "correct-horse-1"); }
+  runas (AuthBootstrap) { SignIn("ada@desk.test", "correct-horse-1"); }
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("ada@desk.test", "Confirm your address")); }
+}
+
+[Test(People)]
+void a_new_address_takes_effect_only_from_its_own_link() {
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "Bo.New@desk.test"); }
+  runas (AuthBootstrap) {
+    // Nothing moved yet; the old address was told, the new one was sent the link.
+    Assert.True(User.Any(u => u.Email == "bo@desk.test"));
+    Assert.Equal(1, MailsTo("bo@desk.test", "Your Kit Test Desk address is changing"));
+    Assert.Equal(1, MailsTo("bo.new@desk.test", "Confirm your new address"));
+  }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("bo.new@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { VerifyEmail(token); }
+  runas (AuthBootstrap) {
+    var bo = User.Single(u => u.DisplayName == "Bo");
+    Assert.Equal("bo.new@desk.test", bo.Email);
+    Assert.NotNull(bo.EmailVerifiedAt);
+  }
+  // …and the account signs in with the new address, not the old.
+  string withNew = "";
+  string withOld = "x";
+  runas (AuthBootstrap) { withNew = SignIn("bo.new@desk.test", "correct-horse-2").Ticket; withOld = SignIn("bo@desk.test", "correct-horse-2").Ticket; }
+  Assert.NotEqual("", withNew);
+  Assert.Equal("", withOld);
+}
+
+[Test(People)]
+void changing_the_address_needs_the_current_password() {
+  runas (AuthBootstrap) { Assert.Throws(() => ChangeEmail("bo@desk.test", "wrong-password", "bo.new@desk.test")); }
+  runas (AuthBootstrap) { Assert.Equal(0, MailsTo("bo.new@desk.test", "")); }
+}
+
+[Test(People)]
+void an_address_another_account_uses_is_refused() {
+  runas (AuthBootstrap) { Assert.Throws(() => ChangeEmail("bo@desk.test", "correct-horse-2", "ada@desk.test")); }
+}
+
+[Test(People)]
+void a_verification_link_is_refused_after_three_days() {
+  runas (AuthBootstrap) { SignIn("ada@desk.test", "correct-horse-1"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/verify-email/"); }
+  TestClock.Advance(TimeSpan.FromDays(3) + TimeSpan.FromMinutes(1));
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail(token)); }
+}
+
+// SECURITY-INVARIANT(accounts-an-address-moves-only-when-the-new-one-confirms): the address is written by
+// `ConfirmAddressChange` alone (and the desk's recorded run). Before 1.0.0 the sign-in flow could write it anywhere —
+// Osysharp.Identity's floor denies it only to everybody ELSE — so the sign-in flow's own write outside the confirmation
+// is what proves `User`'s own deny.
+[Test(People)]
+void an_address_changes_only_through_its_confirmation() {
+  runas (Ada) { Assert.Denied(() => MoveAddress("ada@desk.test", "mallory@desk.test")); }
+  runas (AuthBootstrap) { Assert.Denied(() => MoveAddress("bo@desk.test", "mallory@desk.test")); }
+  runas (AuthBootstrap) { Assert.True(User.Any(u => u.Email == "bo@desk.test")); }
+  // …and through it, it moves.
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.moved@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("bo.moved@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { VerifyEmail(token); }
+  runas (AuthBootstrap) { Assert.Equal("bo.moved@desk.test", User.Single(u => u.DisplayName == "Bo").Email); }
+}
+
+// The same write, made the way a rogue page makes it: the browser changes the field on the signed-in account's own row
+// and commits — a client's unit of work, sent to the server as a delta. Refused, and the address stays.
+[Test(People)]
+void a_browser_cannot_move_its_own_account_to_another_address() {
+  Ui.Visit("/login");
+  Ui.Fill("Email", "bo@desk.test");
+  Ui.Fill("Password", "correct-horse-2");
+  Ui.Click("Sign in");
+  Ui.Visit("/test/move-my-address");
+  Ui.Click("Move my address");
+  Assert.Visible("Refused");
+  runas (AuthBootstrap) { Assert.True(User.Any(u => u.Email == "bo@desk.test")); }
+  runas (AuthBootstrap) { Assert.False(User.Any(u => u.Email == "mallory@desk.test")); }
+}
+
+[Test(People)]
+void a_signed_in_account_cannot_verify_itself_or_move_its_own_address() {
+  runas (Ada) { Assert.Denied(() => MarkVerified("ada@desk.test")); }
+  runas (Ada) { Assert.Denied(() => MoveAddress("ada@desk.test", "mallory@desk.test")); }
+  // …nor make a verification whose token it would know.
+  runas (Ada) {
+    Assert.Denied(() => new EmailCheck { Account = User.Single(u => u.Email == "ada@desk.test"), Email = "ada@desk.test",
+                                         TokenHash = Crypto.Sha256Hex("known"), ExpiresAt = DateTime.UtcNow.AddDays(1) });
+  }
+}

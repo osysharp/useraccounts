@@ -1,0 +1,149 @@
+// A phone number on an account: proven by a texted code, then — when the app offers it — a way to
+// sign in with a texted code, or an account's own choice of second step. Texts go through Osysharp.Sms, so an app with no
+// text-message sender yet still works: the codes wait in the outbox.
+//
+// ⚑ THE APP DECIDES WHAT A NUMBER IS FOR (`AccountsSetup.ProvePhones`, `SmsSignIn`, `SmsSecondStep`), all off by default:
+//   a texted code is cheap for an attacker who has taken over a number (a SIM swap, a port-out), so a number never signs
+//   anybody in unless the app chose that. And it is NEVER the second factor an app can REQUIRE — `SecondFactor.Required`
+//   always means an authenticator app (SECURITY-INVARIANT accounts-sms-is-not-a-required-second-factor, SignIn.osy).
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Sms;
+
+/// Add, change or remove the account's phone number, given its address and password. With a `phone` and no `code`, a
+/// code is texted to it and this answers "sent"; with the code, the number is recorded as proven and this answers "".
+/// With two-step sign-in on, recording a number also takes a current code from the authenticator (`twoStepCode`). An
+/// empty `phone` removes the number — refused while it is the account's second step (turn that off first). Throws the
+/// sentence to show.
+[AuthMethod]
+public string ProvePhone(string email, string password, string phone, string code = "", string twoStepCode = "") {
+  var setup = App.Setting<AccountsSetup>();
+  if (!PhonesOffered()) { throw new ValidationException($"{AccountsAppName()} does not keep phone numbers."); }
+  var account = Verified(email, password);
+  if (phone.Trim() == "") {
+    if (account.SmsSecondStep) { throw new ValidationException("Turn off text-message sign-in codes first — this number is your second step."); }
+    if (account.TotpSecret != null) { RequireCode(account, twoStepCode); }
+    if (account.Phone != null) {
+      var old = account.Phone;
+      account.Phone = null;
+      account.PhoneVerifiedAt = null;
+      SendRendered(account.Email, setup.Mails.PhoneChanged(account, old, false));
+    }
+    return "";
+  }
+  var number = NormalisedPhone(phone);
+  if (number == "") {
+    throw new ValidationException("Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67.");
+  }
+  if (User.Any(u => u.Phone == number && u.PhoneVerifiedAt != null && u.Id != account.Id)) {
+    throw new ValidationException("Another account already uses that number.");
+  }
+  if (code.Trim() == "") {
+    TextCode(account, CodePurpose.ProvePhone, number);
+    return "sent";
+  }
+  if (account.TotpSecret != null) { RequireCode(account, twoStepCode); }
+  var match = CodeMatching(LiveCodesOf(account, CodePurpose.ProvePhone, number), code);
+  if (match == null) {
+    UnitOfWork.Commit();   // the miss is kept: the throw below would discard it
+    throw new ValidationException(WrongCode());
+  }
+  // Moving the texted second step to a new number moves the step with it: the new number was just proven.
+  account.Phone = number;
+  account.PhoneVerifiedAt = DateTime.UtcNow;
+  SendRendered(account.Email, setup.Mails.PhoneChanged(account, number, true));
+  return "";
+}
+
+/// Sign in with a code texted to a proven number, in place of the password — when the app offers it (`SmsSignIn`). With no
+/// `code`, a code is texted if the number belongs to an account that may sign in this way, and the answer is `CodeSent`
+/// either way, so it says nothing about which numbers have accounts. With the code, answers the step that follows, as a
+/// password would: a ticket, an authenticator's code, or setting one up. Throws the sentence to show for a wrong code.
+///
+/// ⚑ AN ACCOUNT WHOSE SECOND STEP IS THIS PHONE IS NOT SIGNED IN BY IT ALONE: one phone is one factor. It is texted how to
+///   sign in instead (`AccountTexts.UsePasswordToSignIn`), and a code is never issued for it.
+[AuthMethod]
+public SignInStep SignInWithPhone(string phone, string code = "") {
+  if (!App.Setting<AccountsSetup>().SmsSignIn) { throw new ValidationException($"{AccountsAppName()} does not sign people in by text message."); }
+  var number = NormalisedPhone(phone);
+  var account = number == "" ? null : User.FirstOrDefault(u => u.Phone == number && u.PhoneVerifiedAt != null);
+  if (code.Trim() == "") {
+    if (account != null && account.IsActive) {
+      if (TextedSecondStep(account)) {
+        // Told once an hour at most — the same bound on a stranger's phone as the codes have.
+        var text = App.Setting<AccountsSetup>().Texts.UsePasswordToSignIn(account);
+        var anHourAgo = DateTime.UtcNow - TimeSpan.FromHours(1);
+        if (!OutgoingSms.Any(m => m.To == number && m.Text == text && m.CreatedAt > anHourAgo)) {
+          SendSms(new SmsMessage { To = number, Text = text });
+        }
+      } else {
+        TextCode(account, CodePurpose.SignIn, number);
+      }
+    }
+    return new SignInStep { CodeSent = true, Account = number == "" ? "" : MaskedPhone(number) };
+  }
+  var match = number == "" ? null : CodeMatching(LiveCodes(CodePurpose.SignIn, number), code);
+  if (match == null || !match.Account.IsActive || TextedSecondStep(match.Account)) {
+    UnitOfWork.Commit();   // the miss is kept: the throw below would discard it
+    throw new ValidationException(WrongCode());
+  }
+  return ContinueSignIn(match.Account);
+}
+
+/// Turn a texted code on or off as the account's second step — when the app offers it (`SmsSecondStep`). On: the address,
+/// the password and a proven number. Off: the same and a code texted to that number — a password alone must never remove
+/// a second step — so with no `code` one is texted and this answers "sent". Answers "", or throws the sentence to show.
+///
+/// ⚠ A CHOICE, NOT A REQUIREMENT: an app that requires a second factor of an account still asks it for an authenticator
+///   app, texted step or not.
+[AuthMethod]
+public string SetSmsSecondStep(string email, string password, bool on, string code = "") {
+  var setup = App.Setting<AccountsSetup>();
+  if (!setup.SmsSecondStep) { throw new ValidationException($"{AccountsAppName()} does not offer text-message sign-in codes."); }
+  var account = Verified(email, password);
+  if (on) {
+    if (account.Phone == null || account.PhoneVerifiedAt == null) { throw new ValidationException("Add and confirm a phone number first."); }
+    if (account.TotpSecret != null) {
+      throw new ValidationException("Two-step sign-in with an authenticator app is on — that is already a stronger second step.");
+    }
+    if (!account.SmsSecondStep) {
+      account.SmsSecondStep = true;
+      SendRendered(account.Email, setup.Mails.TextedStepChanged(account, true));
+    }
+    return "";
+  }
+  if (!account.SmsSecondStep) { return ""; }
+  if (code.Trim() == "") {
+    TextCode(account, CodePurpose.SecondStepOff, account.Phone!);
+    return "sent";
+  }
+  var match = CodeMatching(LiveCodesOf(account, CodePurpose.SecondStepOff, account.Phone!), code);
+  if (match == null) {
+    UnitOfWork.Commit();
+    throw new ValidationException(WrongCode());
+  }
+  account.SmsSecondStep = false;
+  SendRendered(account.Email, setup.Mails.TextedStepChanged(account, false));
+  return "";
+}
+
+/// Does the app keep phone numbers on accounts at all?
+public bool PhonesOffered() {
+  var setup = App.Setting<AccountsSetup>();
+  return setup.ProvePhones || setup.SmsSignIn || setup.SmsSecondStep;
+}
+
+/// What the account page shows about the signed-in account's phone. Runs as the account itself.
+public class PhoneFacts {
+  public string Number = "";
+  public bool Proven = false;
+  public bool SecondStep = false;
+}
+
+public PhoneFacts MyPhone() {
+  var me = Me();
+  if (me == null || me.Phone == null) { return new PhoneFacts(); }
+  return new PhoneFacts { Number = me.Phone, Proven = me.PhoneVerifiedAt != null, SecondStep = me.SmsSecondStep };
+}

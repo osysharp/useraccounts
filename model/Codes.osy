@@ -1,0 +1,182 @@
+// One-time codes — six digits sent to an address or a phone, proving that whoever types them receives messages there. ONE
+// mechanism with two channels: the mail that confirms an address carries a code beside its
+// link, and a text message carries one to prove a phone number, to sign in with a proven number, or as an account's
+// second step.
+//
+// ⚑ EVERY CODE IS BOUNDED THREE WAYS. It is kept only as a KEYED fingerprint (`Security.Fingerprint`, with a nonce of its
+//   own), so a stolen table cannot be guessed offline; it lapses in fifteen minutes and dies at its fifth wrong try; and a
+//   wrong code counts against the account's wrong-code limit (SecondFactor.osy — the same budget an authenticator's codes
+//   spend), and against the sign-in limits, because every function that checks one is an `[AuthMethod]` and a wrong code
+//   throws. Six digits is a million guesses; this makes them years.
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Sms;
+
+// ⚠ Appended, never inserted: an enum is stored by position.
+public enum CodeChannel { Email, Sms }
+
+// ⚠ Appended, never inserted.
+public enum CodePurpose {
+  /// Confirms an address — the account's own, or one it is moving to. Travels with an `EmailCheck`'s link.
+  ProveAddress,
+  /// Confirms a phone number the account added.
+  ProvePhone,
+  /// Signs in with a proven number, in place of the password.
+  SignIn,
+  /// The second step of a sign-in, for an account that chose a texted code as it.
+  SecondStep,
+  /// Turns the texted second step off — a password alone must not remove a second step.
+  SecondStepOff,
+  /// Proves, now, that the signed-in person controls the account's address before they make a request about their
+  /// personal data (`StartStepUp`) — a session left open on a shared computer cannot make one.
+  PrivacyRequest,
+}
+
+/// A six-digit code sent to `Destination` for `Purpose`.
+///
+/// SECURITY-INVARIANT(accounts-one-time-codes-are-fingerprinted-short-lived-and-limited): a one-time code is stored only as
+/// a keyed fingerprint, works once, lapses after `CodeLifetime()`, dies at its `CodeMissesAllowed()`th wrong try, and each
+/// wrong try counts against the account's wrong-code limit — so neither a new code per guess nor a guess per code escapes
+/// it. Only the sign-in flow reads or writes a row. Guarded by tests/codes.test.osy.
+public entity OneTimeCode {
+  [Required] User Account;
+  CodeChannel Channel;
+  CodePurpose Purpose;
+  /// Where it went — a normalised address or an E.164 number.
+  [Required, MaxLength(255)] string Destination;
+  [Required, MaxLength(64)] string CodeHash;
+  [Required, MaxLength(40)] string Nonce;
+  /// For `ProveAddress`: the link it travels with — proving either spends both.
+  EmailCheck? Check;
+  /// For `SecondStep`: the sign-in challenge it answers.
+  SignInChallenge? Challenge;
+  [Required] DateTime ExpiresAt;
+  int Misses = 0;
+  DateTime? UsedAt;
+  security { allow read, create, update when IsAuthenticator; }
+}
+
+/// What a text message the kit sends says — derive and override (`Texts = new MyTexts()`) to write your own. Every text is
+/// asked for HERE, so an override reaches every place it goes out from.
+public class AccountTexts {
+  /// The text carrying a one-time code.
+  public virtual string Code(User account, string code, CodePurpose purpose) {
+    var app = AccountsAppName();
+    if (purpose == CodePurpose.SignIn) { return $"{code} is your code to sign in to {app}. It works for 15 minutes. Nobody from {app} will ask you for it."; }
+    if (purpose == CodePurpose.SecondStep) { return $"{code} is your sign-in code for {app}. It works for 15 minutes. If you are not signing in, change your password."; }
+    if (purpose == CodePurpose.SecondStepOff) { return $"{code} turns off text-message sign-in codes for {app}. If you did not ask, change your password."; }
+    return $"{code} confirms this number for {app}. It works for 15 minutes.";
+  }
+  /// To a number that asked for a sign-in code, when its account signs in with a password and a texted code as its second
+  /// step — the phone alone is one factor, so it is not offered as a way in on its own.
+  public virtual string UsePasswordToSignIn(User account) {
+    return $"Sign in to {AccountsAppName()} with your password — this phone is your second step, so a code alone does not sign you in.";
+  }
+}
+
+/// How long a one-time code works.
+public TimeSpan CodeLifetime() { return TimeSpan.FromMinutes(15); }
+
+/// Wrong tries a code survives.
+int CodeMissesAllowed() { return 5; }
+
+/// Six random digits — drawn from random hex, keeping only its digit characters, so every code is equally likely.
+string NewCode() {
+  var code = "";
+  while (code.Length < 6) {
+    var hex = Security.RandomHex(16);
+    for (var i = 0; i < hex.Length && code.Length < 6; i++) {
+      var c = hex.Substring(i, 1);
+      if ("0123456789".IndexOf(c) >= 0) { code = code + c; }
+    }
+  }
+  return code;
+}
+
+/// A code as it is compared: digits only (people type "123 456" and "123-456").
+string CodeDigits(string code) { return code.Replace(" ", "").Replace("-", "").Trim(); }
+
+string CodeFingerprint(string nonce, string code) { return Security.Fingerprint("one-time-code:" + nonce + ":" + CodeDigits(code)); }
+
+/// A fresh code for `account` to prove `destination` for `purpose`. Every earlier live code for the same thing stops
+/// working — one live code at a time is one code to guess. Answers the code, to put in the message.
+[SuppressWarning("cost-unbounded-read")]   // at most one: each code issued spends the live one before it for the same thing
+string IssueCode(User account, CodeChannel channel, CodePurpose purpose, string destination,
+                 EmailCheck? check = null, SignInChallenge? challenge = null) {
+  var now = DateTime.UtcNow;
+  foreach (var earlier in OneTimeCode.Where(c => c.Account == account && c.Purpose == purpose && c.Destination == destination
+                                                 && c.UsedAt == null).ToList()) {
+    earlier.UsedAt = now;
+  }
+  var code = NewCode();
+  var nonce = Security.RandomId(24);
+  new OneTimeCode { Account = account, Channel = channel, Purpose = purpose, Destination = destination,
+                    CodeHash = CodeFingerprint(nonce, code), Nonce = nonce, Check = check, Challenge = challenge,
+                    ExpiresAt = now + CodeLifetime() };
+  return code;
+}
+
+/// Text a fresh code to `phone` for `purpose` (the message is `AccountsSetup.Texts`'). Outside a sign-in's own second step,
+/// an account is texted a code for the same thing at most once a minute and five times an hour, so nobody can run up the
+/// app's bill — or a stranger's phone — from the page.
+void TextCode(User account, CodePurpose purpose, string phone, SignInChallenge? challenge = null) {
+  var now = DateTime.UtcNow;
+  if (challenge == null) {
+    // Once a minute, and five an hour: codes made in the last minute lapse after `aMinuteAgo`, the last hour's after `anHourAgo`.
+    var aMinuteAgo = now + CodeLifetime() - TimeSpan.FromMinutes(1);
+    var anHourAgo = now + CodeLifetime() - TimeSpan.FromHours(1);
+    if (OneTimeCode.Any(c => c.Account == account && c.Purpose == purpose && c.Destination == phone && c.ExpiresAt > aMinuteAgo)) { return; }
+    if (OneTimeCode.Count(c => c.Account == account && c.Purpose == purpose && c.ExpiresAt > anHourAgo) >= 5) { return; }
+  }
+  var code = IssueCode(account, CodeChannel.Sms, purpose, phone, challenge: challenge);
+  SendSms(new SmsMessage { To = phone, Text = App.Setting<AccountsSetup>().Texts.Code(account, code, purpose) },
+          "code-" + Security.RandomId(16));
+}
+
+/// The live code `code` is, for one of `candidates` — spent and answered — or null, having counted the miss against every
+/// candidate (each dies at its fifth) and its account. Refuses outright while an account has had too many wrong codes.
+/// The caller commits and throws on null, so the miss is kept and the sign-in limits count it.
+OneTimeCode? CodeMatching(List<OneTimeCode> candidates, string code) {
+  var now = DateTime.UtcNow;
+  foreach (var c in candidates) { RefuseWhenLockedOut(c.Account); }
+  foreach (var c in candidates) {
+    if (c.UsedAt == null && c.ExpiresAt > now && c.CodeHash == CodeFingerprint(c.Nonce, code)) {
+      c.UsedAt = now;
+      return c;
+    }
+  }
+  foreach (var c in candidates) {
+    c.Misses = c.Misses + 1;
+    if (c.Misses >= CodeMissesAllowed()) { c.UsedAt = now; }
+    RecordMiss(c.Account);
+  }
+  return null;
+}
+
+/// The live codes for `purpose` that went to `destination`, newest first.
+[SuppressWarning("cost-unbounded-read")]   // the live codes to one address or number — at most one per account, and sending is rate-limited
+List<OneTimeCode> LiveCodes(CodePurpose purpose, string destination) {
+  var now = DateTime.UtcNow;
+  return OneTimeCode.Where(c => c.Purpose == purpose && c.Destination == destination && c.UsedAt == null && c.ExpiresAt > now)
+    .OrderByDescending(c => c.ExpiresAt).ToList();
+}
+
+/// `account`'s codes for `purpose` to `destination` that still work — the ones a code typed in is compared with. Only
+/// the LIVE ones: a code spent or lapsed can never match, and comparing with it counted one wrong try against the
+/// account for every code it had ever been sent, so somebody texted ten codes over time was locked out by one typo.
+[SuppressWarning("cost-unbounded-read")]   // at most one: issuing a code spends every earlier live one for the same thing
+List<OneTimeCode> LiveCodesOf(User account, CodePurpose purpose, string destination) {
+  var now = DateTime.UtcNow;
+  return OneTimeCode.Where(c => c.Account == account && c.Purpose == purpose && c.Destination == destination && c.UsedAt == null
+                                && c.ExpiresAt > now).ToList();
+}
+
+/// The sentence a wrong or spent code answers — one sentence for both, so it says nothing about which.
+string WrongCode() { return "That code is not right, or it has expired — check the newest message, or ask for a new code."; }
+
+/// `+46 70 123 45 67` as `•••• 4567`, for a screen that says where a code went without showing the number.
+public string MaskedPhone(string phone) {
+  return phone.Length <= 4 ? phone : "•••• " + phone.Substring(phone.Length - 4);
+}
