@@ -1,0 +1,282 @@
+// Passkeys — through the kit's functions, as the sign-in flow runs them, with the test playing the device: a P-256 key
+// made here (`WebAuthn.NewTestKey`), and real WebAuthn answers signed with it (`WebAuthn.TestCreate` / `TestGet`), checked
+// by the same `WebAuthn.Register` / `Verify` a browser's answer is.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void PasskeyDesk() {
+  var ada = new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+                       EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = ada, Role = AppRole.Member };
+  new User { Email = "eve@desk.test", DisplayName = "Eve", PasswordHash = Security.HashPassword("battery-staple-2"),
+             EmailVerifiedAt = DateTime.UtcNow };
+  // An admin — whom this app requires to use two-step sign-in (AdminsUseCodes) — who has set nothing up yet.
+  var root = new User { Email = "root@desk.test", DisplayName = "Root", PasswordHash = Security.HashPassword("correct-horse-9"),
+                        EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = root, Role = AppRole.Admin };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+principal Eve => User.Single(u => u.Email == "eve@desk.test");
+
+/// The user handle a passkey of `email`'s account carries.
+string HandleOf(string email) {
+  string handle = "";
+  runas (AuthBootstrap) { handle = PasskeyHandle(User.Single(u => u.Email == email)); }
+  return handle;
+}
+
+/// Add a passkey made from `key` to `email`'s account, proven by its password (and `code`, with two-step sign-in on).
+void AddKey(string email, string password, string key, string name, string code) {
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey(email, password, code); }
+  runas (AuthBootstrap) {
+    AddPasskey(email, "", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), name);
+  }
+}
+
+/// A passkey sign-in with `key`: a fresh ceremony, and the device's answer carrying `handle` and the counter `count`.
+SignInStep SignInWithKey(string key, string handle, long count) {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) {
+    var start = StartPasskeySignIn();
+    step = SignInWithPasskey(start.Token, WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, count, true));
+  }
+  return step;
+}
+
+/// A fresh confirmation with `key` — the token and the answer, for a change that asks "is it you?".
+PasskeyStart ConfirmWith(string key, string handle, long count) {
+  PasskeyStart start = new PasskeyStart();
+  runas (AuthBootstrap) { start = StartPasskeySignIn(); }
+  return new PasskeyStart { Token = start.Token, Options = WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, count, true) };
+}
+
+int PasskeysOf(string email) {
+  int n = 0;
+  runas (AuthBootstrap) { n = PasskeyCredential.Count(p => p.Account.Email == email); }
+  return n;
+}
+
+[Test(PasskeyDesk)]
+void a_passkey_signs_in_with_no_password_and_no_code() {
+  // Ada has two-step sign-in on: her password alone answers a code step…
+  var totp = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", totp, Totp.Code(totp)); }
+  var key = WebAuthn.NewTestKey();
+  AddKey("ada@desk.test", "correct-horse-1", key, "MacBook", Totp.Code(totp, DateTime.UtcNow.AddSeconds(30)));
+  // …and her passkey is both steps at once: a ticket, no challenge, no address typed.
+  var step = SignInWithKey(key, HandleOf("ada@desk.test"), 1);
+  Assert.NotEqual("", step.Ticket);
+  Assert.Equal("", step.Challenge);
+  runas (Ada) {
+    var mine = MyPasskeys();
+    Assert.Equal(1, mine.Passkeys.Count);
+    Assert.Equal("MacBook", mine.Passkeys[0].Name);
+    Assert.NotNull(mine.Passkeys[0].LastUsedAt);
+  }
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("ada@desk.test", "A passkey was added")); }
+}
+
+[Test(PasskeyDesk)]
+void a_passkey_answer_works_once_and_its_ceremony_dies_in_five_minutes() {
+  var key = WebAuthn.NewTestKey();
+  AddKey("ada@desk.test", "correct-horse-1", key, "Phone", "");
+  var handle = HandleOf("ada@desk.test");
+  // The same answer, handed in twice: the first signs in, the replay is refused.
+  PasskeyStart start = new PasskeyStart();
+  runas (AuthBootstrap) { start = StartPasskeySignIn(); }
+  var answer = WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 1, true);
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithPasskey(start.Token, answer).Ticket); }
+  runas (AuthBootstrap) { Assert.Contains("has expired", Assert.Throws<ValidationException>(() => SignInWithPasskey(start.Token, answer)).Message); }
+  // A ceremony nobody answered for five minutes is dead.
+  PasskeyStart late = new PasskeyStart();
+  runas (AuthBootstrap) { late = StartPasskeySignIn(); }
+  var lateAnswer = WebAuthn.TestGet(key, late.Options, PasskeyOrigin(), handle, 2, true);
+  TestClock.Advance(TimeSpan.FromMinutes(6));
+  runas (AuthBootstrap) { Assert.Contains("has expired", Assert.Throws<ValidationException>(() => SignInWithPasskey(late.Token, lateAnswer)).Message); }
+  // An answer for one ceremony is not an answer for another: the challenge it signed is the first one's.
+  PasskeyStart other = new PasskeyStart();
+  runas (AuthBootstrap) { other = StartPasskeySignIn(); }
+  runas (AuthBootstrap) { Assert.Contains("another sign-in's challenge", Assert.Throws<ValidationException>(() => SignInWithPasskey(other.Token, answer)).Message); }
+  // …and an ADD ceremony is never a sign-in.
+  PasskeyAdding adding = new PasskeyAdding();
+  runas (AuthBootstrap) { adding = AddPasskey("ada@desk.test", "correct-horse-1"); }
+  var forged = WebAuthn.TestGet(key, WebAuthn.RequestOptions(adding.Token, PasskeySite(), []), PasskeyOrigin(), handle, 9, true);
+  runas (AuthBootstrap) { Assert.Contains("has expired", Assert.Throws<ValidationException>(() => SignInWithPasskey(adding.Token, forged)).Message); }
+}
+
+[Test(PasskeyDesk)]
+void a_passkey_used_on_another_site_or_without_the_device_checking_who_held_it_is_refused() {
+  var key = WebAuthn.NewTestKey();
+  AddKey("ada@desk.test", "correct-horse-1", key, "Phone", "");
+  var handle = HandleOf("ada@desk.test");
+  // A look-alike page relaying the challenge: the browser says where it really was.
+  runas (AuthBootstrap) {
+    var start = StartPasskeySignIn();
+    Assert.Contains("was used on https://desk-login.example", Assert.Throws<ValidationException>(() => SignInWithPasskey(start.Token, WebAuthn.TestGet(key, start.Options, "https://desk-login.example", handle, 1, true))).Message);
+  }
+  // A device that did not check the person (no PIN, no fingerprint) is one anybody holding it could use.
+  runas (AuthBootstrap) {
+    var start = StartPasskeySignIn();
+    Assert.Contains("did not check it was you", Assert.Throws<ValidationException>(() => SignInWithPasskey(start.Token, WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 1, false))).Message);
+  }
+  // …and adding one made on another site is refused as well.
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("eve@desk.test", "battery-staple-2"); }
+  runas (AuthBootstrap) {
+    Assert.Contains("was used on https://desk-login.example", Assert.Throws<ValidationException>(() => AddPasskey("eve@desk.test", "", "", "", "", "", first.Token,
+                                   WebAuthn.TestCreate(WebAuthn.NewTestKey(), first.Options, "https://desk-login.example"), "Phone")).Message);
+  }
+  Assert.Equal(0, PasskeysOf("eve@desk.test"));
+}
+
+[Test(PasskeyDesk)]
+void a_counter_that_does_not_move_forward_is_refused() {
+  var key = WebAuthn.NewTestKey();
+  AddKey("ada@desk.test", "correct-horse-1", key, "Security key", "");
+  var handle = HandleOf("ada@desk.test");
+  Assert.NotEqual("", SignInWithKey(key, handle, 5).Ticket);
+  // A copy of the key, used after the original moved on, answers an older counter.
+  runas (AuthBootstrap) {
+    var start = StartPasskeySignIn();
+    Assert.Contains("did not move forward", Assert.Throws<ValidationException>(() => SignInWithPasskey(start.Token, WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 3, true))).Message);
+  }
+  Assert.NotEqual("", SignInWithKey(key, handle, 6).Ticket);
+}
+
+[Test(PasskeyDesk)]
+void a_passkey_belongs_to_one_account() {
+  var key = WebAuthn.NewTestKey();
+  AddKey("ada@desk.test", "correct-horse-1", key, "Phone", "");
+  // The same device's passkey cannot be put on a second account…
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("eve@desk.test", "battery-staple-2"); }
+  runas (AuthBootstrap) {
+    Assert.Contains("already on an account here", Assert.Throws<ValidationException>(() => AddPasskey("eve@desk.test", "", "", "", "", "", first.Token,
+                                   WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "Phone")).Message);
+  }
+  Assert.Equal(0, PasskeysOf("eve@desk.test"));
+  // …an answer naming another account's handle is refused…
+  runas (AuthBootstrap) {
+    var start = StartPasskeySignIn();
+    Assert.Contains("belongs to another account", Assert.Throws<ValidationException>(() => SignInWithPasskey(start.Token, WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), HandleOf("eve@desk.test"), 1, true))).Message);
+  }
+  // …it cannot confirm a change to another account…
+  var proof = ConfirmWith(key, HandleOf("ada@desk.test"), 2);
+  runas (AuthBootstrap) { Assert.Contains("not one of this account's", Assert.Throws<ValidationException>(() => AddPasskey("eve@desk.test", "", "", proof.Token, proof.Options)).Message); }
+  // …and nobody but the sign-in flow reads another's passkeys or moves one.
+  runas (Eve) { Assert.Equal(0, MyPasskeys().Passkeys.Count); }
+  runas (Ada) { Assert.Denied(() => MovePasskey("ada@desk.test", "eve@desk.test")); }
+  runas (Ada) { Assert.Denied(() => SwapPasskeyKey("ada@desk.test", "pQECAyYgASFYIA")); }
+}
+
+[Test(PasskeyDesk)]
+void adding_a_passkey_needs_proof_and_a_code_when_two_step_is_on() {
+  runas (AuthBootstrap) { Assert.Contains("not your current password", Assert.Throws<ValidationException>(() => AddPasskey("ada@desk.test", "wrong-guess")).Message); }
+  var totp = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", totp, Totp.Code(totp)); }
+  // The password alone is not enough once a second step guards the account.
+  runas (AuthBootstrap) { Assert.Contains("code is not right", Assert.Throws<ValidationException>(() => AddPasskey("ada@desk.test", "correct-horse-1")).Message); }
+  AddKey("ada@desk.test", "correct-horse-1", WebAuthn.NewTestKey(), "Phone", Totp.Code(totp, DateTime.UtcNow.AddSeconds(30)));
+  Assert.Equal(1, PasskeysOf("ada@desk.test"));
+}
+
+[Test(PasskeyDesk)]
+void the_last_way_in_is_never_removed() {
+  var phone = WebAuthn.NewTestKey();
+  AddKey("ada@desk.test", "correct-horse-1", phone, "Phone", "");
+  var handle = HandleOf("ada@desk.test");
+  // Password sign-in off, confirmed with the passkey…
+  var proof = ConfirmWith(phone, handle, 1);
+  runas (AuthBootstrap) { RemovePassword("ada@desk.test", proof.Token, proof.Options); }
+  // …so the phone is now the only way in, and removing it is refused.
+  var again = ConfirmWith(phone, handle, 2);
+  runas (AuthBootstrap) {
+    Assert.Contains("only way into your account", Assert.Throws<ValidationException>(() => RemovePasskey("ada@desk.test", WebAuthn.TestCredentialId(phone), "", "", again.Token, again.Options)).Message);
+  }
+  Assert.Equal(1, PasskeysOf("ada@desk.test"));
+  // With a spare added, the phone can go.
+  var spare = WebAuthn.NewTestKey();
+  var forAdd = ConfirmWith(phone, handle, 3);
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("ada@desk.test", "", "", forAdd.Token, forAdd.Options); }
+  runas (AuthBootstrap) {
+    AddPasskey("ada@desk.test", "", "", "", "", "", first.Token, WebAuthn.TestCreate(spare, first.Options, PasskeyOrigin()), "Spare key");
+  }
+  var last = ConfirmWith(spare, handle, 1);
+  runas (AuthBootstrap) { RemovePasskey("ada@desk.test", WebAuthn.TestCredentialId(phone), "", "", last.Token, last.Options); }
+  Assert.Equal(1, PasskeysOf("ada@desk.test"));
+  // And the password cannot go from an account with no passkey at all.
+  runas (AuthBootstrap) { Assert.Contains("Confirm with one of your passkeys", Assert.Throws<ValidationException>(() => RemovePassword("eve@desk.test", "", "")).Message); }
+}
+
+[Test(PasskeyDesk)]
+void with_password_sign_in_off_no_password_signs_in_until_the_reset_link_sets_one() {
+  var key = WebAuthn.NewTestKey();
+  AddKey("ada@desk.test", "correct-horse-1", key, "Phone", "");
+  var proof = ConfirmWith(key, HandleOf("ada@desk.test"), 1);
+  runas (AuthBootstrap) { Assert.NotEqual("", RemovePassword("ada@desk.test", proof.Token, proof.Options)); }
+  runas (AuthBootstrap) {
+    var step = SignIn("ada@desk.test", "correct-horse-1");
+    Assert.Equal("", step.Ticket);
+    Assert.Equal("", step.Challenge);
+    Assert.Null(User.Single(u => u.Email == "ada@desk.test").PasswordHash);
+    Assert.Equal(1, MailsTo("ada@desk.test", "Password sign-in is off"));
+  }
+  runas (Ada) { Assert.True(MyPasskeys().PasswordOff); }
+  // Every device lost: the mailed link sets a password, and password sign-in is on again.
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
+  runas (AuthBootstrap) { ResetPassword(token, "a-new-horse-77"); }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("ada@desk.test", "a-new-horse-77").Ticket); }
+  runas (Ada) { Assert.False(MyPasskeys().PasswordOff); }
+}
+
+[Test(PasskeyDesk)]
+void with_password_sign_in_off_a_passkey_moves_the_address_and_nothing_else_does() {
+  var key = WebAuthn.NewTestKey();
+  AddKey("ada@desk.test", "correct-horse-1", key, "Phone", "");
+  var off = ConfirmWith(key, HandleOf("ada@desk.test"), 1);
+  runas (AuthBootstrap) { RemovePassword("ada@desk.test", off.Token, off.Options); }
+  // No password to type: the old one is refused, and so is nothing at all.
+  runas (AuthBootstrap) {
+    Assert.Throws<ValidationException>(() => ChangeEmail("ada@desk.test", "correct-horse-1", "ada@elsewhere.test"));
+    Assert.Throws<ValidationException>(() => ChangeEmail("ada@desk.test", "", "ada@elsewhere.test"));
+  }
+  // Somebody else's passkey proves nothing about Ada's account.
+  var eves = WebAuthn.NewTestKey();
+  AddKey("eve@desk.test", "battery-staple-2", eves, "Eve's", "");
+  var wrong = ConfirmWith(eves, HandleOf("eve@desk.test"), 1);
+  runas (AuthBootstrap) {
+    Assert.Contains("not one of this account's",
+      Assert.Throws<ValidationException>(() => ChangeEmail("ada@desk.test", "", "ada@elsewhere.test", "", wrong.Token, wrong.Options)).Message);
+  }
+  // Her own passkey does: the link goes to the new address, and the old one is told.
+  var proof = ConfirmWith(key, HandleOf("ada@desk.test"), 2);
+  runas (AuthBootstrap) { ChangeEmail("ada@desk.test", "", "ada@elsewhere.test", "", proof.Token, proof.Options); }
+  runas (AuthBootstrap) {
+    Assert.Equal(1, MailsTo("ada@elsewhere.test", ""));
+    Assert.Equal("ada@desk.test", User.Single(u => u.DisplayName == "Ada").Email);
+  }
+}
+
+[Test(PasskeyDesk)]
+void an_account_that_must_use_two_step_sign_in_may_set_up_a_passkey_instead() {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("root@desk.test", "correct-horse-9"); }
+  Assert.True(step.MustEnrol);
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("", "", "", "", "", step.Enrolment); }
+  PasskeyAdding done = new PasskeyAdding();
+  runas (AuthBootstrap) {
+    done = AddPasskey("", "", "", "", "", step.Enrolment, first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "Laptop");
+  }
+  Assert.NotEqual("", done.Ticket);
+  // From now on the passkey signs the admin in — both steps at once.
+  Assert.NotEqual("", SignInWithKey(key, HandleOf("root@desk.test"), 1).Ticket);
+}

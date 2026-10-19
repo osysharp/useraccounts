@@ -51,3 +51,9 @@ void MoveAddress(string email, string newEmail) { User.Single(u => u.Email == em
 void SetPhone(string email, string phone) { User.Single(u => u.Email == email).Phone = phone; }
 void MarkPhoneProven(string email) { User.Single(u => u.Email == email).PhoneVerifiedAt = DateTime.UtcNow; }
 void SetPassword(string email, string password) { User.Single(u => u.Email == email).PasswordHash = Security.HashPassword(password); }
+// A passkey's owner tries to move it to another account, or to swap its key for one of their choosing — both the sign-in
+// flow's alone (SECURITY-INVARIANT accounts-a-passkey-is-one-accounts).
+void MovePasskey(string from, string to) {
+  PasskeyCredential.First(p => p.Account.Email == from).Account = User.Single(u => u.Email == to);
+}
+void SwapPasskeyKey(string email, string key) { PasskeyCredential.First(p => p.Account.Email == email).PublicKey = key; }

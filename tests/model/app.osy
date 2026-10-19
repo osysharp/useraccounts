@@ -21,7 +21,24 @@ app.Accounts = new AccountsSetup {
   AddressProof = new ContractorsProveTheirAddress(),
   // Everything a phone number can do, so the tests reach every texted flow.
   ProvePhones = true, SmsSignIn = true, SmsSecondStep = true,
+  // The desk's own company sign-in shows a building on its buttons (the kit has no mark for it).
+  Marks = new DeskMarks(),
+  // Whose application the desk's own door has not finished — nobody's, until a test says (`DoorUnfinished`).
+  OwnDoor = new DeskOwnDoor(),
 };
+
+/// The desk's own door, finished for everybody unless a test stubs `DoorUnfinished`.
+public class DeskOwnDoor : OwnDoorPolicy {
+  public override bool Unfinished(User account) { return DoorUnfinished(account.Email); }
+}
+
+/// Whether the desk's own door has not finished with the account at `email` — no, until a test says so.
+bool DoorUnfinished(string email) { return false; }
+
+/// A mark for the provider the kit does not know, and the kit's own for every other.
+public class DeskMarks : ProviderMarks {
+  public override Icons For(string provider) { return provider == "Acme SSO" ? Icons.Building : base.For(provider); }
+}
 
 // Every role the app is told was given — what a test reads to see a sign-up tell it (the kit's RolesTold.osy).
 app.Roles = new RolesSetup { Events = new RecordingRoles() };
@@ -70,7 +87,9 @@ string DeskLogoUrl() { return ""; }
 bool AddressProofRequired() { return false; }
 
 // The providers the desk signs people in with — what its sign-in page offers as "Continue with …". The secrets' values
-// are never set here: a test reaches the provider sign-in through `TestOAuth.PendingToken`, the seal the callback makes.
+// are never set here: a test reaches the provider sign-in through `TestOAuth.PendingToken`, the seal the callback makes,
+// and states what is OFFERED with `OfferedSignInProviders.Stub`. `Unfinished` is declared before it was set up — no
+// client id — which is what the beta's GitHub was (2026-10-13), and it is never offered.
 app.Secrets = [ new Secret("GoogleSecret"), new Secret("GitHubSecret") ];
 app.OAuthClients = [
   new OAuthClient("Google") {
@@ -80,6 +99,9 @@ app.OAuthClients = [
   new OAuthClient("GitHub") {
     Provider = OAuthProvider.Github, Capabilities = [OAuthCapability.Login],
     ClientId = "desk-github", ClientSecret = Secret.GitHubSecret, Scopes = ["read:user", "user:email"],
+  },
+  new OAuthClient("Unfinished") {
+    Provider = OAuthProvider.Microsoft, Capabilities = [OAuthCapability.Login], ClientSecret = Secret.GitHubSecret,
   },
 ];
 

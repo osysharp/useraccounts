@@ -21,11 +21,18 @@ public entity User : Principal {
   /// When two-step sign-in was turned on — null while it is off. The account's owner reads it (the account page).
   DateTime? SecondFactorOnAt;
   /// The account's phone number, E.164 — set by the sign-in flow alone, once a texted code proved it (`ProvePhone`).
-  [MaxLength(20)] string? Phone;
+  /// `[Unique]` because a number is one account's (SECURITY-INVARIANT accounts-one-account-per-proven-number): the check
+  /// before a code is texted gives the sentence, and the database refuses the second of two proofs that raced past it.
+  [Unique, MaxLength(20)] string? Phone;
   /// When the number was proven — null for none.
   DateTime? PhoneVerifiedAt;
   /// The account chose a texted code as its second step (`SetSmsSecondStep`) — never the factor an app can require.
   bool SmsSecondStep = false;
+
+  /// Password sign-in is off (`RemovePassword`): the account signs in with its passkeys, and its password was removed.
+  /// The reset link sets one again and turns this back off. What the account page reads, since the hash is not its own
+  /// to read.
+  bool PasswordSignInOff = false;
 
   // ⚠ This block is the floor every type derived from `User` stands on — one rule per kind of caller, derived exactly.
   security {
@@ -40,6 +47,7 @@ public entity User : Principal {
     deny read PasswordHash when !IsAuthenticator;
     deny update PasswordHash when !IsAuthenticator;
     deny update PasswordChangedAt when !IsAuthenticator;
+    deny update PasswordSignInOff when !IsAuthenticator;
     // SECURITY-INVARIANT(accounts-second-factor-secret-is-the-sign-in-flows-alone): nobody but the sign-in flow reads
     // the authenticator secret — the account itself included, once it is on — or writes any of the three fields that
     // say whether a second factor guards the account. Else a borrowed session could read the secret (and mint every
@@ -57,10 +65,13 @@ public entity User : Principal {
     deny update SmsSecondStep when !IsAuthenticator;
     deny read Phone when !IsAuthenticator where Id != user.Id;
     // SECURITY-INVARIANT(accounts-an-address-moves-only-when-the-new-one-confirms): the address that signs in — and that a
-    // reset link goes to — changes only once the NEW address has confirmed it (`ConfirmAddressChange`, SignIn.osy), or
-    // through the desk's recorded change (AssistedChange.osy's run). `Email` is Osysharp.Identity's; this narrows it on
-    // every account the kit makes. Guarded by tests/email.test.osy.
-    deny update Email except via ConfirmAddressChange;
+    // reset link goes to — changes only once the NEW address has confirmed it (`ConfirmAddressChange`, SignIn.osy),
+    // through the desk's recorded change (`MoveAccountForTheDesk`, called by AssistedChange.osy's run alone), or when the
+    // account is erased (`ForgetAccountAddress`, called by `EraseAccount` alone). The three functions below are every way
+    // it changes: no workflow step or handler writes it either, the kit's own included. `Email` is Osysharp.Identity's;
+    // this narrows it on every account the kit makes. Guarded by tests/email.test.osy, tests/assisted-change.test.osy and
+    // tests/erasure.test.osy.
+    deny update Email except via ConfirmAddressChange, MoveAccountForTheDesk, ForgetAccountAddress;
   }
 }
 
@@ -93,7 +104,12 @@ public entity EmailCheck {
   [Required, Unique, MaxLength(64)] string TokenHash;
   [Required] DateTime ExpiresAt;
   DateTime? UsedAt;
-  security { allow read, create, update when IsAuthenticator; }
+  security {
+    allow read, create, update when IsAuthenticator;
+    // The account sees its own — which address a confirmation is on its way to (`MyAddress`) — and never the hash.
+    allow read when IsAuthenticated where Account == user;
+    deny read TokenHash when !IsAuthenticator;
+  }
 }
 
 // ── the setup ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -147,6 +163,30 @@ public class AccountsSetup {
   /// (`File.Url("public/brand/logo.svg")`) or an https address. None by default: the screens show the name alone. A
   /// `data:` address is not drawn — the platform keeps them out of every page.
   public string LogoUrl = "";
+  /// The mark each sign-in provider's buttons show. GitHub, Google and Microsoft have theirs built in; derive and
+  /// override `For` to give another provider its own (see `ProviderMarks`).
+  public ProviderMarks Marks = new ProviderMarks();
+  /// Which accounts the app's own door has not finished with — an application whose phone is not proven yet, say. A
+  /// provider sign-in for such an account goes back to that door instead of signing in (see `OwnDoorPolicy`).
+  public OwnDoorPolicy OwnDoor = new OwnDoorPolicy();
+}
+
+/// Accounts an app's own door — an application form, a beta's front door — has started and not finished. By default
+/// none. An app whose door takes more than one visit (a code texted to a phone, say) derives and says which:
+///
+///     public class ApplicationsInProgress : OwnDoorPolicy {
+///       public override bool Unfinished(User account) {
+///         return Application.Any(a => a.Account == account && a.Status == ApplicationStatus.Confirming);
+///       }
+///     }
+///     app.Accounts = new AccountsSetup { …, OwnDoor = new ApplicationsInProgress() };
+///
+/// A provider sign-in for such an account answers `SignInStep.OwnDoor` and no ticket, so the provider page shows the
+/// app's own door again (`ProviderSignIn(ownDoor: true)`) and the person picks up where they left off. Asked as the
+/// sign-in flow, so it may read what only that flow may.
+public class OwnDoorPolicy {
+  /// Has the app's own door started `account` and not finished it?
+  public virtual bool Unfinished(User account) { return false; }
 }
 
 /// Whose address must be proven before they are signed in, beyond `RequireVerifiedEmail` (which asks it of everybody). By
@@ -245,6 +285,8 @@ public class AccountsFacts {
   public string LogoUrl = "";
   /// The providers the app offers for signing in (`app.OAuthClients` that may sign people in) — the page's buttons.
   public List<string> Providers = [];
+  /// The mark each of those providers' buttons shows.
+  public List<ProviderMark> Marks = [];
   /// What the app lets a phone number do — the account page's phone section and the sign-in page's text-message door.
   public bool Phones = false;
   public bool SmsSignIn = false;
@@ -257,8 +299,9 @@ public AccountsFacts AccountsPageFacts() {
   var setup = App.Setting<AccountsSetup>();
   return new AccountsFacts {
     AppName = AccountsAppName(), SignupOpen = setup.SignupOpen, MinPasswordLength = setup.MinPasswordLength,
-    HomePath = setup.HomePath, LogoUrl = setup.LogoUrl, Providers = Security.SignInProviders(),
+    HomePath = setup.HomePath, LogoUrl = setup.LogoUrl, Providers = OfferedSignInProviders(),
     Phones = PhonesOffered(), SmsSignIn = setup.SmsSignIn, SmsSecondStep = setup.SmsSecondStep,
+    Marks = ProviderMarksOf(OfferedSignInProviders()),
   };
 }
 

@@ -15,12 +15,17 @@ using Osysharp.Mail;
 /// The address an erased account is left with: unique (the column is), and on a domain that cannot receive mail.
 public string ErasedAddress(Principal account) { return $"erased-{account.Id}@erased.invalid"; }
 
+/// An erased account's address goes — one of the three ways an account's address changes (`User`'s
+/// `deny update Email except via …`). Called by `EraseAccount` alone.
+[Server, Authorize(IsAuthenticator)]
+void ForgetAccountAddress(User account) { account.Email = ErasedAddress(account); }
+
 /// Erase `account`: every way in, every way to reach it, and every record of how it signed in. Written as the run that
 /// erases — a workflow body, as the system — so call it from one: in a request the kit's own rules refuse it, as they
 /// refuse every other write to an account's address and credentials.
 ///
 /// SECURITY-INVARIANT(accounts-an-erased-account-has-no-way-in): after `EraseAccount` the account is inactive, has no
-/// password, no second factor, no phone, no linked provider and no role, every session it had is ended, and no reset
+/// password, no passkey, no second factor, no phone, no linked provider and no role, every session it had is ended, and no reset
 /// link, address link or code issued to it still works. Guarded by tests/erasure.test.osy.
 [SuppressWarning("cost-unbounded-read")]   // one person's links, codes and mail — an erasure reaches every one
 public void EraseAccount(User account) {
@@ -33,6 +38,8 @@ public void EraseAccount(User account) {
   foreach (var c in SignInChallenge.Where(c => c.Account == account).ToList()) { c.Delete(); }
   foreach (var c in RecoveryCode.Where(c => c.Account == account).ToList()) { c.Delete(); }
   foreach (var m in SecondFactorMiss.Where(m => m.Account == account).ToList()) { m.Delete(); }
+  foreach (var p in PasskeyCredential.Where(p => p.Account == account).ToList()) { p.Delete(); }
+  foreach (var c in PasskeyCeremony.Where(c => c.Account == account).ToList()) { c.Delete(); }
   foreach (var s in StepUp.Where(s => s.Account == account).ToList()) { s.Destination = ""; }
   foreach (var c in AddressChangeRequest.Where(c => c.Account == account).ToList()) {
     c.OldAddress = "";
@@ -47,7 +54,7 @@ public void EraseAccount(User account) {
   foreach (var g in RoleGrant.Where(g => g.Member == account).ToList()) { g.Delete(); }
   foreach (var g in RoleGivenAtSignup.Where(g => g.Member == account).ToList()) { g.Delete(); }
   EraseMailTo(address);
-  account.Email = ErasedAddress(account);
+  ForgetAccountAddress(account);
   account.DisplayName = "";
   account.IsActive = false;
   account.ExternalId = null;
@@ -59,6 +66,7 @@ public void EraseAccount(User account) {
   account.Phone = null;
   account.PhoneVerifiedAt = null;
   account.SmsSecondStep = false;
+  account.PasswordSignInOff = false;
   account.ApiKeyHash = null;
   account.ApiKeyHash2 = null;
 }

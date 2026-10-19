@@ -105,6 +105,42 @@ translations sv {
   /// shown through [Title]
   title "Your account" => "Ditt konto";
 
+  // ── AccountPasskeyMail ──
+  /// AccountPasskeyMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {name} = name (string)
+  /// shown through EmailLayout.preview
+  mailPreview "\"{name}\" no longer signs you in." => "\"{name}\" loggar inte längre in dig.";
+  /// AccountPasskeyMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {name} = name (string)
+  /// shown through EmailLayout.preview
+  mailPreview "\"{name}\" now signs you in." => "\"{name}\" loggar nu in dig.";
+  /// AccountPasskeyMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "A passkey was added to your {AccountsAppName} account" => "En nyckel har lagts till på ditt konto hos {AccountsAppName}";
+  /// AccountPasskeyMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "A passkey was removed from your {AccountsAppName} account" => "En nyckel har tagits bort från ditt konto hos {AccountsAppName}";
+  /// AccountPasskeyMail · text on the page
+  /// shown through EmailHeading.text
+  text "A passkey was added" => "En nyckel har lagts till";
+  /// AccountPasskeyMail · text on the page
+  /// shown through EmailHeading.text
+  text "A passkey was removed" => "En nyckel har tagits bort";
+  /// AccountPasskeyMail · text on the page
+  /// shown through EmailNote.text
+  text "If this was not you, check the passkeys left on your account page and choose a new password." => "Om det inte var du, kontrollera nycklarna som finns kvar på din kontosida och välj ett nytt lösenord.";
+  /// AccountPasskeyMail · text on the page
+  /// shown through EmailNote.text
+  text "If this was not you, remove it from your account page at once and choose a new password." => "Om det inte var du, ta bort den från din kontosida direkt och välj ett nytt lösenord.";
+  /// AccountPasskeyMail · text on the page
+  /// placeholders: {name} = name (string), {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  text "The passkey \"{name}\" no longer signs in to {AccountsAppName} as {account.Email}." => "Nyckeln \"{name}\" loggar inte längre in på {AccountsAppName} som {account.Email}.";
+  /// AccountPasskeyMail · text on the page
+  /// placeholders: {name} = name (string), {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string)
+  /// shown through EmailText.text
+  text "The passkey \"{name}\" now signs in to {AccountsAppName} as {account.Email} — with no password and no code." => "Nyckeln \"{name}\" loggar nu in på {AccountsAppName} som {account.Email}, utan lösenord och utan kod.";
+
   // ── AccountPasswordChangedMail ──
   /// AccountPasswordChangedMail · an email's subject line
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
@@ -122,6 +158,27 @@ translations sv {
   /// shown through EmailHeading.text
   /// beside: "If it was not you, choose a new password from the sign-in page at once — the link there comes to this address."
   text "Your password was changed" => "Ditt lösenord har ändrats";
+
+  // ── AccountPasswordRemovedMail ──
+  /// AccountPasswordRemovedMail · the preview line an inbox shows beside an email's subject
+  /// shown through EmailLayout.preview
+  mailPreview "You sign in with your passkeys now." => "Du loggar in med dina nycklar nu.";
+  /// AccountPasswordRemovedMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  mailSubject "Password sign-in is off for {AccountsAppName}" => "Inloggning med lösenord är avstängd hos {AccountsAppName}";
+  /// AccountPasswordRemovedMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Password sign-in is off"
+  text "Lost every device with a passkey? \"Forgot your password?\" on the sign-in page mails you a link that sets a password again." => "Har du tappat bort alla enheter med en nyckel? \"Glömt lösenordet?\" på inloggningssidan mejlar dig en länk som sätter ett lösenord igen.";
+  /// AccountPasswordRemovedMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "Lost every device with a passkey? "Forgot your password?" on the sign-in page mails you a link that sets a password again."
+  text "Password sign-in is off" => "Inloggning med lösenord är avstängd";
+  /// AccountPasswordRemovedMail · text on the page
+  /// placeholders: {account.Email} = account.Email (string), {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through EmailText.text
+  /// beside: "Password sign-in is off", "Lost every device with a passkey? "Forgot your password?" on the sign-in page mails you a link that sets a password again."
+  text "{account.Email} no longer has a password for {AccountsAppName}: it signs in with its passkeys, and nothing that knows only a password can sign it in." => "{account.Email} har inte längre något lösenord hos {AccountsAppName}: kontot loggar in med sina nycklar, och inget som bara kan ett lösenord kan logga in det.";
 
   // ── AccountPhoneMail ──
   /// AccountPhoneMail · the preview line an inbox shows beside an email's subject
@@ -301,69 +358,123 @@ translations sv {
   text "Your two-step sign-in was reset" => "Din tvåstegsinloggning har återställts";
 
   // ── AccountSettings ──
+  /// AccountSettings · a button's label · at most ~19 characters
+  /// shown through Button.label
+  button "Add a number…" => "Lägg till nummer…";
   /// AccountSettings · a button's label · at most ~20 characters
   /// shown through Button.label
-  /// beside: "Current password", "New password", "Change password", "New address"
-  button "Change address" => "Byt adress";
+  button "Add a passkey…" => "Lägg till en nyckel…";
+  /// AccountSettings · a button's label · at most ~10 characters
+  /// shown through Button.label
+  button "Back" => "Tillbaka";
+  /// AccountSettings · a button's label · at most ~12 characters
+  /// shown through Button.label
+  /// beside: "Save"
+  button "Cancel" => "Avbryt";
   /// AccountSettings · a button's label · at most ~21 characters
   /// shown through Button.label
-  /// beside: "Current password", "New password", "New address", "Change address"
-  button "Change password" => "Byt lösenord";
+  button "Change address…" => "Ändra adress…";
   /// AccountSettings · a button's label · at most ~20 characters
   /// shown through Button.label
-  /// beside: "Code from the text"
-  button "Confirm number" => "Bekräfta numret";
+  button "Change number…" => "Ändra nummer…";
+  /// AccountSettings · a button's label · at most ~23 characters
+  /// shown through Button.label
+  button "Change password…" => "Ändra lösenord…";
+  /// AccountSettings · a button's label · at most ~31 characters
+  /// shown through Button.label
+  button "Confirm with a passkey" => "Bekräfta med en nyckel";
+  /// AccountSettings · a button's label · at most ~24 characters
+  /// shown through Button.label
+  button "I have saved them" => "Jag har sparat dem";
   /// AccountSettings · a button's label · at most ~14 characters
   /// placeholders: {p} = p (string)
   /// shown through Button.label
   button "Link {p}" => "Koppla {p}";
-  /// AccountSettings · a button's label · at most ~30 characters
+  /// AccountSettings · a button's label · at most ~31 characters
   /// shown through Button.label
-  /// beside: "New recovery codes"
-  button "Move to another phone" => "Flytta till en annan telefon";
+  /// beside: "New recovery codes…"
+  button "Move to another phone…" => "Flytta till en annan telefon…";
+  /// AccountSettings · a button's label · at most ~27 characters
+  /// shown through Button.label
+  button "New recovery codes…" => "Nya reservkoder…";
   /// AccountSettings · a button's label · at most ~26 characters
   /// shown through Button.label
-  button "New recovery codes" => "Nya återställningskoder";
-  /// AccountSettings · a button's label · at most ~24 characters
+  button "Remove the number…" => "Ta bort numret…";
+  /// AccountSettings · a button's label · at most ~13 characters
   /// shown through Button.label
-  button "Remove the number" => "Ta bort numret";
-  /// AccountSettings · a button's label · at most ~33 characters
+  /// beside: "Rename…"
+  button "Remove…" => "Ta bort…";
+  /// AccountSettings · a button's label · at most ~13 characters
   /// shown through Button.label
-  /// beside: "After your password, signing in asks for a code from an authenticator app on your phone — so a stolen password is not enough."
-  button "Set up two-step sign-in" => "Ställ in tvåstegsinloggning";
-  /// AccountSettings · a button's label · at most ~41 characters
-  /// shown through Button.label
-  /// beside: "Or have a code texted to this number each time you sign in. An authenticator app is stronger — a number can be moved to somebody else's SIM."
-  button "Text me a code when I sign in" => "Sms:a mig en kod när jag loggar in";
-  /// AccountSettings · a button's label · at most ~30 characters
-  /// shown through Button.label
-  /// beside: "Code from the text"
-  button "Turn off texted codes" => "Stäng av sms-koder";
-  /// AccountSettings · a button's label · at most ~35 characters
-  /// shown through Button.label
-  /// beside: "New recovery codes"
-  button "Turn off two-step sign-in" => "Stäng av tvåstegsinloggning";
+  /// beside: "Remove…"
+  button "Rename…" => "Byt namn…";
   /// AccountSettings · a button's label · at most ~12 characters
   /// shown through Button.label
+  button "Resend" => "Skicka igen";
+  /// AccountSettings · a button's label · at most ~21 characters
+  /// shown through Button.label
+  button "Send a new link" => "Skicka en ny länk";
+  /// AccountSettings · a button's label · at most ~34 characters
+  /// shown through Button.label
+  button "Set up two-step sign-in…" => "Ställ in tvåstegsinloggning…";
+  /// AccountSettings · a button's label · at most ~42 characters
+  /// shown through Button.label
+  button "Text me a code when I sign in…" => "Sms:a mig en kod när jag loggar in…";
+  /// AccountSettings · a button's label · at most ~37 characters
+  /// shown through Button.label
+  button "Turn off password sign-in…" => "Stäng av inloggning med lösenord…";
+  /// AccountSettings · a button's label · at most ~31 characters
+  /// shown through Button.label
+  button "Turn off texted codes…" => "Stäng av sms-koder…";
+  /// AccountSettings · a button's label · at most ~37 characters
+  /// shown through Button.label
+  /// beside: "New recovery codes…"
+  button "Turn off two-step sign-in…" => "Stäng av tvåstegsinloggning…";
+  /// AccountSettings · a button's label · at most ~13 characters
+  /// shown through Button.label
   /// beside: "Linked"
-  button "Unlink" => "Koppla bort";
+  button "Unlink…" => "Koppla bort…";
+  /// AccountSettings · a button's label · at most ~30 characters
+  /// shown through Button.label
+  button "Use a passkey instead" => "Använd en nyckel i stället";
+  /// AccountSettings · a description
+  /// shown through SettingsSection.description
+  /// beside: "Address", "Password", "Passkeys"
+  description "A code from an app on your phone after your password, so a stolen password is not enough." => "En kod från en app i din telefon efter lösenordet, så att ett stulet lösenord inte räcker.";
+  /// AccountSettings · a description
+  /// shown through SettingsSection.description
+  description "Another account that signs you in here." => "Ett annat konto som loggar in dig här.";
+  /// AccountSettings · a description
+  /// shown through SettingsSection.description
+  /// beside: "Address", "Passkeys", "Two-step sign-in"
+  description "What you sign in with, after your address." => "Det du loggar in med, efter din adress.";
+  /// AccountSettings · a description
+  /// shown through SettingsSection.description
+  /// beside: "Password", "Passkeys", "Two-step sign-in"
+  description "Where your mail goes, and how you sign in." => "Dit din e-post går och hur du loggar in.";
+  /// AccountSettings · a description
+  /// shown through SettingsSection.description
+  description "With its country code. A text proves it is yours." => "Med landskod. Ett sms bevisar att det är ditt.";
+  /// AccountSettings · a description
+  /// shown through SettingsSection.description
+  /// beside: "Address", "Password", "Two-step sign-in"
+  description "Your phone, your laptop or a security key signs you in — no password, no code." => "Din telefon, din dator eller en säkerhetsnyckel loggar in dig: inget lösenord, ingen kod.";
   /// AccountSettings · a hint under a field
   /// shown through Field.hint
-  /// beside: "New password", "Change password", "New address", "Change address"
-  hint "Needed for every change below." => "Behövs för alla ändringar nedan.";
+  hint "So you can tell your passkeys apart. Your device asks you to confirm next." => "Så att du kan hålla isär dina nycklar. Din enhet ber dig bekräfta härnäst.";
   /// AccountSettings · a hint under a field
   /// shown through Field.hint
-  hint "Needed too, with two-step sign-in on. A recovery code works as well." => "Behövs också när tvåstegsinloggning är på. En återställningskod fungerar också.";
+  /// beside: "Current password"
+  hint "Type it last, so it is fresh. A recovery code works as well." => "Skriv den sist, så att den är färsk. En reservkod fungerar också.";
   /// AccountSettings · a hint under a field
   /// shown through Field.hint
-  /// beside: "Current password", "New password", "Change password", "Change address"
-  hint "Or your own address, to have a new confirmation link sent." => "Eller din egen adress, för att få en ny bekräftelselänk skickad.";
+  hint "We mail it a link; your account moves to it when the link is opened." => "Vi mejlar en länk dit; ditt konto flyttas dit när länken öppnas.";
   /// AccountSettings · a hint under a field
   /// shown through Field.hint
-  /// beside: "Phone"
   hint "With its country code. We text it a code to confirm it is yours." => "Med landsnummer. Vi sms:ar en kod till det för att bekräfta att det är ditt.";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~26 characters
   /// shown through Field.label
+  /// beside: "Current password"
   /// also in ProviderSignIn
   label "Code from your app" => "Kod från din app";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~15 characters
@@ -371,90 +482,103 @@ translations sv {
   label "Confirmed" => "Bekräftad";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~23 characters
   /// shown through Field.label
-  /// beside: "New password", "Change password", "New address", "Change address"
+  /// beside: "Code from your app"
   /// also in ProviderSignIn
   label "Current password" => "Nuvarande lösenord";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~12 characters
   /// shown through Badge.label
-  /// beside: "Unlink"
+  /// beside: "Unlink…"
   label "Linked" => "Kopplat";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~10 characters
+  /// shown through Field.label
+  label "Name" => "Namn";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~17 characters
   /// shown through Field.label
-  /// beside: "Current password", "New password", "Change password", "Change address"
   label "New address" => "Ny adress";
-  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~16 characters
-  /// shown through Field.label
-  /// beside: "Phone"
-  label "New number" => "Nytt nummer";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~19 characters
   /// shown through Badge.label
   label "Not confirmed" => "Inte bekräftad";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~9 characters
   /// shown through Badge.label
+  /// beside: "You sign in with your passkeys."
   label "Off" => "Av";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~8 characters
   /// shown through Badge.label
   label "On" => "På";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~12 characters
+  /// shown through Badge.label
+  label "Synced" => "Synkad";
   /// AccountSettings · message
   /// placeholders: {facts.AppName} = facts.AppName (string)
   /// shown through Alert.message
   message "{facts.AppName} asks for two-step sign-in on your account." => "{facts.AppName} kräver tvåstegsinloggning på ditt konto.";
   /// AccountSettings · note
-  /// placeholders: {me.Email} = me.Email (string)
+  /// placeholders: {address.Email} = address.Email (string)
   /// shown through note
-  note "A new link to confirm {me.Email} is on its way." => "En ny länk för att bekräfta {me.Email} är på väg.";
-  /// AccountSettings · note
-  /// shown through note
-  note "Signing in now asks for a code texted to your phone." => "Inloggningen kräver nu en kod som skickas med sms till din telefon.";
-  /// AccountSettings · note
-  /// shown through note
-  note "Texted sign-in codes are off." => "Inloggningskoder via sms är av.";
-  /// AccountSettings · note
-  /// shown through note
-  note "Two-step sign-in is off." => "Tvåstegsinloggning är av.";
-  /// AccountSettings · note
-  /// placeholders: {newEmail} = newEmail (string)
-  /// shown through note
-  note "We have sent a link to {newEmail}. Your account moves to it when you open it." => "Vi har skickat en länk till {newEmail}. Ditt konto flyttas dit när du öppnar den.";
-  /// AccountSettings · note
-  /// placeholders: {phone.Number} = phone.Number (string)
-  /// shown through note
-  note "Your number {phone.Number} is confirmed." => "Ditt nummer {phone.Number} är bekräftat.";
-  /// AccountSettings · note
-  /// shown through note
-  note "Your password is changed." => "Ditt lösenord är ändrat.";
-  /// AccountSettings · note
-  /// shown through note
-  note "Your phone number is removed." => "Ditt telefonnummer är borttaget.";
-  /// AccountSettings · note
-  /// placeholders: {provider} = provider (string)
-  /// shown through note
-  note "{provider} no longer signs in to your account." => "{provider} loggar inte längre in på ditt konto.";
+  note "A new link to confirm {address.Email} is on its way." => "En ny länk för att bekräfta {address.Email} är på väg.";
+  /// AccountSettings · placeholder text inside an empty field · at most ~34 characters
+  /// shown through Field.placeholder
+  placeholder "MacBook, iPhone, YubiKey" => "MacBook, iPhone, YubiKey";
   /// AccountSettings · text on the page
-  /// beside: "Set up two-step sign-in"
-  text "After your password, signing in asks for a code from an authenticator app on your phone — so a stolen password is not enough." => "Efter lösenordet kräver inloggningen en kod från en autentiseringsapp i din telefon, så ett stulet lösenord räcker inte.";
+  /// placeholders: {address.Pending} = address.Pending (string)
+  /// beside: "Your account moves to it when the link in that mail is opened.", "Resend"
+  text "Confirmation sent to {address.Pending}" => "Bekräftelse skickad till {address.Pending}";
   /// AccountSettings · text on the page
-  /// beside: "Text me a code when I sign in"
-  text "Or have a code texted to this number each time you sign in. An authenticator app is stronger — a number can be moved to somebody else's SIM." => "Eller få en kod via sms till det här numret varje gång du loggar in. En autentiseringsapp är säkrare, eftersom ett nummer kan flyttas till någon annans SIM-kort.";
+  /// beside: "Off"
+  text "Lost every device with a passkey? \"Forgot your password?\" on the sign-in page mails you a link that sets one again." => "Har du tappat bort alla enheter med en nyckel? \"Glömt lösenordet?\" på inloggningssidan mejlar dig en länk som sätter ett nytt.";
   /// AccountSettings · text on the page
-  text "Phone" => "Telefon";
+  text "No number" => "Inget nummer";
   /// AccountSettings · text on the page
-  /// beside: "Unlinking asks for your current password. Signed up with a provider and have none? Choose one with a link from the sign-in page's "Forgot your password?"."
-  text "Sign in with" => "Logga in med";
+  text "No passkeys yet." => "Inga nycklar än.";
   /// AccountSettings · text on the page
-  /// placeholders: {twoStep.RecoveryCodesLeft} = twoStep.RecoveryCodesLeft (int) — {twoStep.RecoveryCodesLeft} is a count: give one text per plural form
-  /// beside: "New recovery codes"
-  text "Signing in asks for a code from your app. {twoStep.RecoveryCodesLeft} recovery codes left." => { one: "Inloggningen ber om en kod från din app. {twoStep.RecoveryCodesLeft} reservkod kvar.", other: "Inloggningen ber om en kod från din app. {twoStep.RecoveryCodesLeft} reservkoder kvar." };
+  text "Signing in asks for a code texted to this number." => "Inloggningen kräver en kod via sms till det här numret.";
   /// AccountSettings · text on the page
-  text "Signing in asks for a code texted to this number after your password." => "Inloggningen kräver en kod via sms till det här numret efter ditt lösenord.";
-  /// AccountSettings · text on the page
-  text "Two-step sign-in" => "Tvåstegsinloggning";
+  text "This browser cannot make passkeys." => "Den här webbläsaren kan inte skapa nycklar.";
   /// AccountSettings · text on the page
   /// shown through problem
-  text "Type your current password first — setting up two-step sign-in asks for it." => "Skriv först ditt nuvarande lösenord. Det behövs för att ställa in tvåstegsinloggning.";
+  text "Type the address to move to." => "Skriv adressen du vill flytta till.";
   /// AccountSettings · text on the page
-  /// beside: "Sign in with"
-  text "Unlinking asks for your current password. Signed up with a provider and have none? Choose one with a link from the sign-in page's \"Forgot your password?\"." => "För att koppla bort krävs ditt nuvarande lösenord. Registrerade du dig via en leverantör och har inget? Välj ett med en länk från ”Glömt lösenordet?” på inloggningssidan.";
+  /// shown through problem
+  text "Type the new password." => "Skriv det nya lösenordet.";
+  /// AccountSettings · text on the page
+  /// shown through problem
+  text "Type the number." => "Skriv numret.";
+  /// AccountSettings · text on the page
+  text "We texted a code to your number." => "Vi har skickat en kod via sms till ditt nummer.";
+  /// AccountSettings · text on the page
+  /// placeholders: {newPhone} = newPhone (string)
+  text "We texted a code to {newPhone}." => "Vi har skickat en kod via sms till {newPhone}.";
+  /// AccountSettings · text on the page
+  /// beside: "Off"
+  text "You sign in with your passkeys." => "Du loggar in med dina nycklar.";
+  /// AccountSettings · text on the page
+  /// beside: "Resend"
+  text "Your account moves to it when the link in that mail is opened." => "Ditt konto flyttas dit när länken i det mejlet öppnas.";
+  /// AccountSettings · text on the page
+  /// placeholders: {twoStep.RecoveryCodesLeft} = twoStep.RecoveryCodesLeft (int) — {twoStep.RecoveryCodesLeft} is a count: give one text per plural form
+  text "{twoStep.RecoveryCodesLeft} recovery codes left" => { one: "{twoStep.RecoveryCodesLeft} reservkod kvar", other: "{twoStep.RecoveryCodesLeft} reservkoder kvar" };
+  /// AccountSettings · a title
+  /// shown through SettingsSection.title
+  /// beside: "Password", "Passkeys", "Two-step sign-in"
+  title "Address" => "Adress";
+  /// AccountSettings · a title
+  /// shown through SettingsSection.title
+  /// beside: "Address", "Password", "Two-step sign-in"
+  title "Passkeys" => "Nycklar";
+  /// AccountSettings · a title
+  /// shown through SettingsSection.title
+  /// beside: "Address", "Passkeys", "Two-step sign-in"
+  title "Password" => "Lösenord";
+  /// AccountSettings · a title
+  /// shown through SettingsSection.title
+  title "Phone" => "Telefon";
+  /// AccountSettings · a title
+  /// shown through SettingsSection.title
+  title "Sign in with" => "Logga in med";
+  /// AccountSettings · a title
+  /// shown through SettingsSection.title
+  /// beside: "Address", "Password", "Passkeys"
+  title "Two-step sign-in" => "Tvåstegsinloggning";
 
   // ── AccountStepUpMail ──
   /// AccountStepUpMail · the preview line an inbox shows beside an email's subject
@@ -571,33 +695,74 @@ translations sv {
   /// shown through AccountsAppName()
   alt "your account" => "ditt konto";
 
-  // ── AccountsQrCode ──
-  /// AccountsQrCode · a control's name for screen readers
-  accessibleName "QR code for your authenticator app" => "QR-kod för din autentiseringsapp";
+  // ── AddPasskey ──
+  /// AddPasskey · an error message
+  /// shown through ValidationException
+  error "Adding that passkey took too long — start again." => "Det tog för lång tid att lägga till nyckeln. Börja om.";
+  /// AddPasskey · an error message
+  /// placeholders: {PasskeysAllowed} = PasskeysAllowed(…) (int) — {PasskeysAllowed} is a count: give one text per plural form
+  /// shown through ValidationException
+  error "An account may have {PasskeysAllowed} passkeys — remove one you no longer use first." => { one: "Ett konto får ha en nyckel. Ta bort den du inte längre använder först.", other: "Ett konto får ha {PasskeysAllowed} nycklar. Ta bort en som du inte längre använder först." };
+  /// AddPasskey · an error message
+  /// shown through ValidationException
+  error "That passkey is already on an account here." => "Den nyckeln finns redan på ett konto här.";
+  /// AddPasskey · an error message
+  /// shown through ValidationException
+  /// also in Enrolling
+  error "That sign-in has expired — start again from the sign-in page." => "Inloggningen har gått ut. Börja om från inloggningssidan.";
 
   // ── AddressCodeStep ──
   /// AddressCodeStep · a button's label · at most ~13 characters
   /// shown through Button.label
-  /// beside: "Code from the mail"
+  /// beside: "Confirm your email address", "The mail says what comes next — a six-digit code to type here, or a link to open. Either one confirms that the address is yours; this is not a second sign-in step.", "Code from the mail"
+  /// also in AccountSettings
   button "Confirm" => "Bekräfta";
   /// AddressCodeStep · a button's label · at most ~21 characters
   /// shown through Button.label
   button "Send a new code" => "Skicka en ny kod";
   /// AddressCodeStep · a label (a field, a list item, a menu entry) · at most ~26 characters
   /// shown through Field.label
-  /// beside: "Confirm"
+  /// beside: "Confirm your email address", "The mail says what comes next — a six-digit code to type here, or a link to open. Either one confirms that the address is yours; this is not a second sign-in step.", "Confirm"
   label "Code from the mail" => "Kod från mejlet";
   /// AddressCodeStep · message
   /// placeholders: {address} = address (string)
   /// shown through Alert.message
-  /// beside: "Code from the mail", "Confirm"
-  message "Check your mail at {address}. It says what comes next — a six-digit code to type here, or a link to open." => "Titta i din e-post på {address}. Där står vad som händer härnäst: en sexsiffrig kod att skriva in här, eller en länk att öppna.";
+  /// beside: "The mail says what comes next — a six-digit code to type here, or a link to open. Either one confirms that the address is yours; this is not a second sign-in step.", "Code from the mail", "Confirm"
+  message "Check your mail at {address}." => "Titta i din e-post på {address}.";
+  /// AddressCodeStep · message
+  /// placeholders: {undelivered} = undelivered (string)
+  /// shown through Alert.message
+  message "{undelivered} No code will arrive there — if the address is wrong, go back and use the right one." => "{undelivered} Ingen kod kommer fram dit. Om adressen är fel, gå tillbaka och använd rätt adress.";
   /// AddressCodeStep · text on the page
   text "If a new code was due, it is on its way." => "Om det var dags för en ny kod är den på väg.";
+  /// AddressCodeStep · text on the page
+  /// beside: "Confirm your email address", "Code from the mail", "Confirm"
+  text "The mail says what comes next — a six-digit code to type here, or a link to open. Either one confirms that the address is yours; this is not a second sign-in step." => "I mejlet står vad som händer härnäst: en sexsiffrig kod att skriva in här, eller en länk att öppna. Båda bekräftar att adressen är din. Det här är inte ett andra inloggningssteg.";
+  /// AddressCodeStep · a title
+  /// shown through Alert.title
+  /// beside: "The mail says what comes next — a six-digit code to type here, or a link to open. Either one confirms that the address is yours; this is not a second sign-in step.", "Code from the mail", "Confirm"
+  title "Confirm your email address" => "Bekräfta din e-postadress";
+  /// AddressCodeStep · a title
+  /// shown through Alert.title
+  title "The mail did not arrive" => "Mejlet kom inte fram";
+
+  // ── AddressMailProblems ──
+  /// AddressMailProblems · an error message
+  /// shown through ValidationException
+  error "Ask about at most 200 addresses at once." => "Fråga om högst 200 adresser åt gången.";
+
+  // ── Asserted ──
+  /// Asserted · an error message
+  /// shown through ValidationException
+  error "That passkey does not sign in to an account here." => "Den nyckeln loggar inte in på något konto här.";
+  /// Asserted · an error message
+  /// shown through ValidationException
+  error "That passkey sign-in has expired — start again." => "Inloggningen med nyckel har gått ut. Börja om.";
 
   // ── ChangeAddressFor ──
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
+  /// also in GiveManagedAccountAnAddress
   /// also in ChangeEmail
   error "Another account already uses that address." => "Ett annat konto använder redan den adressen.";
   /// ChangeAddressFor · an error message
@@ -605,12 +770,61 @@ translations sv {
   error "Say why the address is changed — how you know it is their account." => "Skriv varför adressen ändras — hur du vet att det är deras konto.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
-  /// also in SignUp
+  /// also in GiveManagedAccountAnAddress
+  /// also in SignUpAtDoor
   /// also in ChangeEmail
   error "That does not look like an email address." => "Det ser inte ut som en e-postadress.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
   error "That is already the account's address." => "Det är redan kontots adress.";
+
+  // ── ChangeTitle ──
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Add a number" => "Lägg till nummer";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Add a passkey" => "Lägg till en nyckel";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Change address" => "Ändra adress";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Change number" => "Ändra nummer";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Change password" => "Ändra lösenord";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "New recovery codes" => "Nya reservkoder";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Remove the number" => "Ta bort numret";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Remove the passkey" => "Ta bort nyckeln";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Rename the passkey" => "Byt namn på nyckeln";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Set up two-step sign-in" => "Ställ in tvåstegsinloggning";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Texted sign-in codes" => "Inloggningskoder via sms";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Turn off password sign-in" => "Stäng av inloggning med lösenord";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Turn off texted codes" => "Stäng av sms-koder";
+  /// ChangeTitle · a title
+  /// shown through ChangeTitle()
+  title "Turn off two-step sign-in" => "Stäng av tvåstegsinloggning";
+  /// ChangeTitle · a title
+  /// placeholders: {provider} = provider (string)
+  /// shown through ChangeTitle()
+  title "Unlink {provider}" => "Koppla bort {provider}";
 
   // ── Claim ──
   /// Claim · an error message
@@ -628,6 +842,50 @@ translations sv {
   /// ConfirmAddressChange · an error message
   /// shown through ValidationException
   error "That link proves an address; it does not move the account." => "Den länken bekräftar en adress; den flyttar inte kontot.";
+
+  // ── ConfirmLine ──
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "New codes replace the ones you have. Confirm it is you." => "Nya koder ersätter de du har. Bekräfta att det är du.";
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "Signing in will ask for a code texted to your phone. Confirm it is you." => "Inloggningen kommer att kräva en kod via sms till din telefon. Bekräfta att det är du.";
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "To add a passkey, confirm it is you — then your device makes it." => "Bekräfta att det är du för att lägga till en nyckel. Sedan skapar din enhet den.";
+  /// ConfirmLine · text on the page
+  /// placeholders: {Trim} = newPhone.Trim(…) (string)
+  /// shown through ConfirmLine()
+  text "To add {Trim}, confirm it is you — then we text it a code." => "Bekräfta att det är du för att lägga till {Trim}, sedan skickar vi en kod via sms dit.";
+  /// ConfirmLine · text on the page
+  /// placeholders: {Trim} = newEmail.Trim(…) (string)
+  /// shown through ConfirmLine()
+  text "To move your account to {Trim}, confirm it is you." => "Bekräfta att det är du för att flytta ditt konto till {Trim}.";
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "To remove this passkey, confirm it is you." => "Bekräfta att det är du för att ta bort nyckeln.";
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "To remove your number, confirm it is you." => "Bekräfta att det är du för att ta bort ditt nummer.";
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "To save your new password, confirm it is you." => "Bekräfta att det är du för att spara ditt nya lösenord.";
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "To set up two-step sign-in, confirm it is you." => "Bekräfta att det är du för att ställa in tvåstegsinloggning.";
+  /// ConfirmLine · text on the page
+  /// placeholders: {provider} = provider (string)
+  /// shown through ConfirmLine()
+  text "To stop {provider} signing you in, confirm it is you." => "Bekräfta att det är du för att {provider} inte längre ska logga in dig.";
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "To turn off two-step sign-in, confirm it is you." => "Bekräfta att det är du för att stänga av tvåstegsinloggning.";
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "To turn texted codes off, confirm it is you — then we text you a code." => "Bekräfta att det är du för att stänga av sms-koder, sedan skickar vi en kod till dig via sms.";
+  /// ConfirmLine · text on the page
+  /// shown through ConfirmLine()
+  text "Your password is removed, and you sign in with your passkeys. Confirm with one of them — it proves it works." => "Ditt lösenord tas bort, och du loggar in med dina nycklar. Bekräfta med en av dem: det visar att den fungerar.";
 
   // ── ConfirmPasswordStep ──
   /// ConfirmPasswordStep · a button's label · at most ~27 characters
@@ -662,11 +920,6 @@ translations sv {
   /// shown through ValidationException
   error "Two-step sign-in is already on. To move it to another phone, turn it off first — that asks for a code." => "Tvåstegsinloggning är redan på. För att flytta den till en annan telefon, stäng av den först. Då behövs en kod.";
 
-  // ── Enrolling ──
-  /// Enrolling · an error message
-  /// shown through ValidationException
-  error "That sign-in has expired — start again from the sign-in page." => "Inloggningen har gått ut. Börja om från inloggningssidan.";
-
   // ── ForgotPasswordForm ──
   /// ForgotPasswordForm · a button's label · at most ~21 characters
   /// shown through Button.label
@@ -694,6 +947,14 @@ translations sv {
   /// shown through AccountsFrame.sub
   text "We will mail you a link to choose a new one." => "Vi mejlar dig en länk för att välja ett nytt.";
 
+  // ── GiveManagedAccountAnAddress ──
+  /// GiveManagedAccountAnAddress · an error message
+  /// shown through ValidationException
+  error "Only the person who looks after this account can give it an address." => "Bara den som tar hand om det här kontot kan ge det en adress.";
+  /// GiveManagedAccountAnAddress · an error message
+  /// shown through ValidationException
+  error "That account already has an address of its own." => "Det kontot har redan en egen adress.";
+
   // ── LinkProvider ──
   /// LinkProvider · an error message
   /// placeholders: {provider} = provider (string)
@@ -707,10 +968,33 @@ translations sv {
   /// shown through ValidationException
   error "That {provider} account already signs in to another account here." => "Det {provider}-kontot loggar redan in på ett annat konto här.";
 
+  // ── MakeManagedAccount ──
+  /// MakeManagedAccount · an error message
+  /// shown through ValidationException
+  error "Give a name of at most 200 characters." => "Ange ett namn på högst 200 tecken.";
+  /// MakeManagedAccount · an error message
+  /// shown through ValidationException
+  error "Give the account a name — the person's name as you know it." => "Ge kontot ett namn, personens namn som du känner hen.";
+
+  // ── ManagedAccountMaking ──
+  /// ManagedAccountMaking · an error message
+  /// shown through ValidationException
+  /// also in SignUpWithProvider
+  /// also in SignUpAtDoor
+  error "The app's AccountKinds.New made an account for another address — it must use the one it was given." => "Appens AccountKinds.New skapade ett konto för en annan adress. Den måste använda den adress den fick.";
+
   // ── NewRecoveryCodes ──
   /// NewRecoveryCodes · an error message
   /// shown through ValidationException
   error "Turn two-step sign-in on first." => "Slå på tvåstegsinloggning först.";
+
+  // ── NumberThisAccountMayProve ──
+  /// NumberThisAccountMayProve · an error message
+  /// shown through ValidationException
+  error "Another account already uses that number." => "Ett annat konto använder redan det numret.";
+  /// NumberThisAccountMayProve · an error message
+  /// shown through ValidationException
+  error "Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67." => "Skriv numret med + och landsnummer: +46 70 123 45 67, inte 070 123 45 67.";
 
   // ── Osysharp.UserAccounts.AddressChangeState ──
   /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~11 characters
@@ -734,6 +1018,16 @@ translations sv {
   /// shown through Osysharp.UserAccounts.CodeChannel.Sms
   /// beside: "Email"
   label "Sms" => "Sms";
+
+  // ── Osysharp.UserAccounts.ManagedAccountState ──
+  /// Osysharp.UserAccounts.ManagedAccountState · a label (a field, a list item, a menu entry) · at most ~10 characters
+  /// shown through Osysharp.UserAccounts.ManagedAccountState.Made
+  /// beside: "Making the account"
+  label "Made" => "Skapat";
+  /// Osysharp.UserAccounts.ManagedAccountState · a label (a field, a list item, a menu entry) · at most ~26 characters
+  /// shown through Osysharp.UserAccounts.ManagedAccountState.Making
+  /// beside: "Made"
+  label "Making the account" => "Kontot skapas";
 
   // ── Osysharp.UserAccounts.RoleToldState ──
   /// Osysharp.UserAccounts.RoleToldState · a label (a field, a list item, a menu entry) · at most ~13 characters
@@ -767,20 +1061,30 @@ translations sv {
   /// beside: "Sending the code", "Checking the code", "Proven", "Not proven"
   label "Waiting for the code" => "Väntar på koden";
 
+  // ── PasskeyLine ──
+  /// PasskeyLine · text on the page
+  /// placeholders: {added} = added (string)
+  /// shown through PasskeyLine()
+  text "Added {added}" => "Tillagd {added}";
+  /// PasskeyLine · text on the page
+  /// placeholders: {added} = added (string), {used} = used (string)
+  /// shown through PasskeyLine()
+  text "Added {added} · last used {used}" => "Tillagd {added} · senast använd {used}";
+
   // ── ProvePhone ──
-  /// ProvePhone · an error message
-  /// shown through ValidationException
-  error "Another account already uses that number." => "Ett annat konto använder redan det numret.";
   /// ProvePhone · an error message
   /// shown through ValidationException
   error "Turn off text-message sign-in codes first — this number is your second step." => "Stäng av inloggningskoder via sms först. Det här numret är ditt andra steg.";
   /// ProvePhone · an error message
-  /// shown through ValidationException
-  error "Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67." => "Skriv numret med + och landsnummer: +46 70 123 45 67, inte 070 123 45 67.";
-  /// ProvePhone · an error message
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
   /// shown through ValidationException
+  /// also in NumberThisAccountMayProve
   error "{AccountsAppName} does not keep phone numbers." => "{AccountsAppName} sparar inga telefonnummer.";
+
+  // ── ProvenOwner ──
+  /// ProvenOwner · an error message
+  /// shown through ValidationException
+  error "That passkey is not one of this account's." => "Den nyckeln hör inte till det här kontot.";
 
   // ── ProviderSignIn ──
   /// ProviderSignIn · a button's label · at most ~27 characters
@@ -837,6 +1141,29 @@ translations sv {
   /// RefuseWhenLockedOut · an error message
   /// shown through ValidationException
   error "Too many wrong codes — wait fifteen minutes, then try again." => "För många felaktiga koder. Vänta femton minuter och försök sedan igen.";
+
+  // ── RemovePasskey ──
+  /// RemovePasskey · an error message
+  /// shown through ValidationException
+  /// also in RenamePasskey
+  error "That passkey is not on your account." => "Den nyckeln finns inte på ditt konto.";
+  /// RemovePasskey · an error message
+  /// shown through ValidationException
+  error "That passkey is the only way into your account. Add another passkey — or set a password with \"Forgot your password?\" — before removing it." => "Den nyckeln är det enda sättet att komma in på ditt konto. Lägg till en nyckel till, eller sätt ett lösenord med \"Glömt lösenordet?\", innan du tar bort den.";
+
+  // ── RemovePassword ──
+  /// RemovePassword · an error message
+  /// shown through ValidationException
+  error "Confirm with one of your passkeys — that is what you will sign in with once the password is gone." => "Bekräfta med en av dina nycklar: det är med dem du loggar in när lösenordet är borta.";
+
+  // ── RenamePasskey ──
+  /// RenamePasskey · an error message
+  /// shown through ValidationException
+  error "Give it a name." => "Ge den ett namn.";
+  /// RenamePasskey · an error message
+  /// shown through ValidationException
+  /// also in StartStepUp
+  error "Sign in first." => "Logga in först.";
 
   // ── RequireCode ──
   /// RequireCode · an error message
@@ -911,6 +1238,9 @@ translations sv {
   /// shown through Field.label
   /// beside: "1. Scan this with an authenticator app — Google Authenticator, Microsoft Authenticator, 1Password, or any other.", "Or type this key into the app:", "2. Type the six-digit code the app now shows.", "Turn on two-step sign-in"
   label "Code from the app" => "Kod från appen";
+  /// SecondFactorEnrolment · a label (a field, a list item, a menu entry) · at most ~48 characters
+  /// shown through QrCode.label
+  label "QR code for your authenticator app" => "QR-kod för din autentiseringsapp";
   /// SecondFactorEnrolment · message
   /// shown through Alert.message
   /// beside: "I have saved them — continue"
@@ -950,6 +1280,13 @@ translations sv {
   /// placeholders: {p} = p (string)
   /// shown through Button.label
   button "Continue with {p}" => "Fortsätt med {p}";
+  /// SignInForm · a button's label · at most ~34 characters
+  /// shown through Button.label
+  /// beside: "Or use a passkey — your phone, laptop or a security key signs you in, with no code to type."
+  button "Set up a passkey instead" => "Lägg till en nyckel i stället";
+  /// SignInForm · a button's label · at most ~31 characters
+  /// shown through Button.label
+  button "Sign in with a passkey" => "Logga in med en nyckel";
   /// SignInForm · a button's label · at most ~44 characters
   /// shown through Button.label
   /// beside: "Phone number"
@@ -1018,6 +1355,9 @@ translations sv {
   /// beside: "Code"
   /// also in SecondFactorCodeStep
   text "Open your authenticator app and type the six-digit code it shows for this account." => "Öppna din autentiseringsapp och skriv in den sexsiffriga kod som den visar för det här kontot.";
+  /// SignInForm · text on the page
+  /// beside: "Set up a passkey instead"
+  text "Or use a passkey — your phone, laptop or a security key signs you in, with no code to type." => "Eller använd en nyckel: din telefon, din dator eller en säkerhetsnyckel loggar in dig, utan någon kod att skriva.";
   /// SignInForm · text on the page
   /// shown through problem
   text "That address and password do not match an account." => "Adressen och lösenordet matchar inget konto.";
@@ -1122,17 +1462,6 @@ translations sv {
   /// shown through AccountsFrame.heading
   heading "Create an account" => "Skapa ett konto";
 
-  // ── SignUpWithProvider ──
-  /// SignUpWithProvider · an error message
-  /// shown through ValidationException
-  /// also in SignUp
-  error "The app's AccountKinds.New made an account for another address — it must use the one it was given." => "Appens AccountKinds.New skapade ett konto för en annan adress. Den måste använda den adress den fick.";
-
-  // ── StartStepUp ──
-  /// StartStepUp · an error message
-  /// shown through ValidationException
-  error "Sign in first." => "Logga in först.";
-
   // ── UnlinkProvider ──
   /// UnlinkProvider · an error message
   /// placeholders: {provider} = provider (string)
@@ -1158,6 +1487,11 @@ translations sv {
   /// VerifyEmailResult · a link · at most ~14 characters
   /// shown through TextLink.label
   link "Continue" => "Fortsätt";
+  /// VerifyEmailResult · message
+  /// placeholders: {step.Account} = step.Account (string)
+  /// shown through Alert.message
+  /// beside: "Continue"
+  message "Your account already uses {step.Account} — nothing more to do." => "Ditt konto använder redan {step.Account}. Inget mer behöver göras.";
   /// VerifyEmailResult · message
   /// placeholders: {step.Account} = step.Account (string)
   /// shown through Alert.message

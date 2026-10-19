@@ -52,6 +52,12 @@ public class AccountMails {
   public virtual RenderedEmail ProviderLinked(User account, string provider) { return AccountProviderMail(account, provider, true); }
   /// A provider no longer signs in to the account.
   public virtual RenderedEmail ProviderUnlinked(User account, string provider) { return AccountProviderMail(account, provider, false); }
+  /// A passkey called `name` now signs in to the account.
+  public virtual RenderedEmail PasskeyAdded(User account, string name) { return AccountPasskeyMail(account, name, true); }
+  /// The passkey called `name` no longer signs in to the account.
+  public virtual RenderedEmail PasskeyRemoved(User account, string name) { return AccountPasskeyMail(account, name, false); }
+  /// Password sign-in was turned off: the account signs in with its passkeys.
+  public virtual RenderedEmail PasswordRemoved(User account) { return AccountPasswordRemovedMail(account); }
   /// The code that proves it is you, now, for `purpose` (`StartStepUp`).
   public virtual RenderedEmail StepUpCode(User account, string code, CodePurpose purpose) { return AccountStepUpMail(account, code, purpose); }
 }
@@ -230,6 +236,34 @@ public component AccountProviderMail(User account, string provider, bool linked)
       EmailNote(linked
         ? "If this was not you, unlink it from your account page and choose a new password at once."
         : "If this was not you, choose a new password at once: whoever did it knows your password.");
+    }
+  }
+}
+
+[Email]
+public component AccountPasskeyMail(User account, string name, bool added) {
+  subject => added ? $"A passkey was added to your {AccountsAppName()} account" : $"A passkey was removed from your {AccountsAppName()} account";
+  render {
+    EmailLayout(AccountsAppName(), preview: added ? $"\"{name}\" now signs you in." : $"\"{name}\" no longer signs you in.") {
+      EmailHeading(added ? "A passkey was added" : "A passkey was removed");
+      EmailText(added
+        ? $"The passkey \"{name}\" now signs in to {AccountsAppName()} as {account.Email} — with no password and no code."
+        : $"The passkey \"{name}\" no longer signs in to {AccountsAppName()} as {account.Email}.");
+      EmailNote(added
+        ? "If this was not you, remove it from your account page at once and choose a new password."
+        : "If this was not you, check the passkeys left on your account page and choose a new password.");
+    }
+  }
+}
+
+[Email]
+public component AccountPasswordRemovedMail(User account) {
+  subject => $"Password sign-in is off for {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: "You sign in with your passkeys now.") {
+      EmailHeading("Password sign-in is off");
+      EmailText($"{account.Email} no longer has a password for {AccountsAppName()}: it signs in with its passkeys, and nothing that knows only a password can sign it in.");
+      EmailNote("Lost every device with a passkey? \"Forgot your password?\" on the sign-in page mails you a link that sets a password again.");
     }
   }
 }

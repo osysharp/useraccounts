@@ -1,0 +1,329 @@
+// Passkeys: signing in with the phone, the laptop or a security key the person already carries — a key pair made on
+// the device, unlocked there by a PIN, a fingerprint or a face, and checked here by its signature. No address to type,
+// nothing to remember, nothing a fake page can collect: the browser offers a passkey only to the app it was made for.
+//
+// ⚑ A PASSKEY IS BOTH STEPS AT ONCE. It is something the person has (the device) and something they are or know (what
+//   unlocks it — user verification is REQUIRED, never preferred), so a passkey sign-in answers a ticket, with no code
+//   after it, even for an account the app requires two-step sign-in of. That is the point: it replaces the password AND
+//   the authenticator app.
+//
+// ⚑ WHAT IS NATIVE AND WHAT IS NOT. `WebAuthn.*` (the platform) reads the binary formats and checks the signature, the
+//   origin, the relying party and the verification flag; `Passkey.Create`/`Passkey.Get` (the browser) ask the device.
+//   Everything that decides about an ACCOUNT is here: which challenge is live, which account a passkey belongs to, who
+//   may add or remove one, and that the last way in is never removed.
+//
+// ⚑ SEVERAL PER ACCOUNT, BY DESIGN — the Mac, the phone, a hardware key in a drawer as the spare. Losing a device is
+//   recovered by another passkey, or by the reset link (`RequestPasswordReset`), which sets a password again.
+
+namespace Osysharp.UserAccounts;
+
+using Osysharp.Identity;
+using Osysharp.Mail;
+
+/// A passkey on an account: the public half of the key pair the device made (the private half never leaves it), and
+/// what the account page shows about it.
+///
+/// SECURITY-INVARIANT(accounts-a-passkey-is-one-accounts): a passkey signs in to exactly one account — its credential id
+/// is `[Unique]` across the app, an add refuses an id already kept, and a sign-in's user handle must be that account's
+/// (`WebAuthn.Verify`). Only the sign-in flow writes the key, the id, the account and the counter; the owner may rename
+/// it, and read only its own. Guarded by tests/passkeys.test.osy.
+public entity PasskeyCredential {
+  [Required] User Account;
+  /// The credential id the device answers with (base64url) — how a sign-in finds the key to check.
+  [Required, Unique, MaxLength(1400)] string CredentialId;
+  /// The public key, as the COSE key `WebAuthn.Register` answered (base64url). Not a secret.
+  [Required, MaxLength(2000)] string PublicKey;
+  /// The signature counter last seen — a sign-in whose counter does not move forward is refused (`WebAuthn.Verify`).
+  long SignCount = 0;
+  /// What the person calls it — "MacBook", "iPhone", "YubiKey in the drawer".
+  [Required, MaxLength(80)] string Name;
+  /// The passkey is synced between the person's devices (iCloud Keychain, Google Password Manager, a password manager).
+  bool BackedUp = false;
+  [Required] DateTime CreatedAt;
+  DateTime? LastUsedAt;
+  security {
+    allow read, create, update, delete when IsAuthenticator;
+    allow read when IsAuthenticated where Account == user;
+    allow update when IsAuthenticated where Account == user;
+    deny update Account when !IsAuthenticator;
+    deny update CredentialId when !IsAuthenticator;
+    deny update PublicKey when !IsAuthenticator;
+    deny update SignCount when !IsAuthenticator;
+    deny update BackedUp when !IsAuthenticator;
+    deny update CreatedAt when !IsAuthenticator;
+    deny update LastUsedAt when !IsAuthenticator;
+  }
+}
+
+/// One passkey ceremony — a sign-in, a confirmation, or an add. Only the challenge's HASH is kept.
+///
+/// SECURITY-INVARIANT(accounts-passkey-challenge-single-use-expiring): every passkey answer is checked against a
+/// challenge the sign-in flow minted (`StartPasskeySignIn`, `AddPasskey`), kept only as its hash, alive for five
+/// minutes, and spent by the first answer that comes back for it — right or wrong — so a captured answer cannot be
+/// replayed, and an add ceremony is never accepted as a sign-in (nor the other way round). Guarded by
+/// tests/passkeys.test.osy.
+public entity PasskeyCeremony {
+  [Required, Unique, MaxLength(64)] string TokenHash;
+  /// The account an ADD is for, proven when it started. Null for a sign-in or a confirmation: the passkey that answers
+  /// says whose it is.
+  User? Account;
+  bool ForAdd = false;
+  [Required] DateTime ExpiresAt;
+  DateTime? UsedAt;
+  security { allow read, create, update, delete when IsAuthenticator; }
+}
+
+/// What a passkey ceremony starts with: the challenge `Token` to hand back with the answer, and the `Options` for the
+/// browser (`Passkey.Get(start.Options)`).
+public class PasskeyStart {
+  public string Token = "";
+  public string Options = "";
+}
+
+/// What `AddPasskey` answers. Its first half (no `addToken`): the `Token` and the `Options` for `Passkey.Create`. Its
+/// second half: done — with a `Ticket` when it was the passkey an account set up at sign-in (`SignInStep.Enrolment`).
+public class PasskeyAdding {
+  public string Token = "";
+  public string Options = "";
+  public string Ticket = "";
+}
+
+/// What `WebAuthn.Register` answers about a new passkey.
+public class PasskeyRegistered {
+  public string CredentialId = "";
+  public string PublicKey = "";
+  public long SignCount = 0;
+  public bool BackedUp = false;
+}
+
+/// One of the signed-in account's passkeys, for its account page.
+public class PasskeyFacts {
+  public string CredentialId = "";
+  public string Name = "";
+  public bool BackedUp = false;
+  public DateTime CreatedAt = DateTime.UtcNow;
+  public DateTime? LastUsedAt = null;
+}
+
+/// The signed-in account's passkeys, and whether it still signs in with a password.
+public class PasskeysFacts {
+  public List<PasskeyFacts> Passkeys = [];
+  public bool PasswordOff = false;
+}
+
+// ── the flows ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// Start a passkey sign-in — or a confirmation that it is you, before a change (the same ceremony; what the answer is
+/// handed to decides which). Answers the challenge token and the options for `Passkey.Get`: they ask for any passkey
+/// this browser holds for the app, so nobody types an address, and nothing about any account is in them.
+[AuthMethod]
+public PasskeyStart StartPasskeySignIn() {
+  var token = Security.RandomId(32);
+  var now = DateTime.UtcNow;
+  // The table holds only live ceremonies and recent ones: a few of the long-expired go each time one starts.
+  foreach (var old in PasskeyCeremony.Where(c => c.ExpiresAt < now - TimeSpan.FromDays(1)).Take(20).ToList()) { old.Delete(); }
+  new PasskeyCeremony { TokenHash = TokenHash(token), ExpiresAt = now + PasskeyLifetime() };
+  return new PasskeyStart { Token = token, Options = WebAuthn.RequestOptions(token, PasskeySite(), []) };
+}
+
+/// Sign in with a passkey: the token `StartPasskeySignIn` answered and the browser's answer (`Passkey.Get`). Answers a
+/// `SignInStep` — a ticket; or `MustVerify` when the app requires a proven address and this one is not. A passkey is
+/// both steps at once, so no code follows it. Throws the sentence to show when the passkey is not one of an account
+/// here, the ceremony is spent, or a check fails.
+///
+/// SECURITY-INVARIANT(accounts-a-passkey-sign-in-is-both-steps): a passkey sign-in issues a ticket only for an answer
+/// `WebAuthn.Verify` accepted — the person verified on the device, for this challenge, origin and site, with the stored
+/// key, its counter moving forward — so it stands in for the password and the second factor together, and is refused
+/// for an inactive account. Guarded by tests/passkeys.test.osy.
+[AuthMethod]
+public SignInStep SignInWithPasskey(string token, string response) {
+  var account = Asserted(token, response).Account;
+  if (account.EmailVerifiedAt == null && MustProveAddress(account)) {
+    EnsureVerification(account);
+    return new SignInStep { MustVerify = true, Account = account.Email };
+  }
+  return new SignInStep { Ticket = Admit(account) };
+}
+
+/// Add a passkey to the account `email` names — in two halves, as a browser needs. First (no `addToken`), proof that it
+/// is the account's owner — a passkey it already has (`passkeyToken` + `passkeyResponse`, a confirmation
+/// `StartPasskeySignIn` began), or the password and, with two-step sign-in on, a current `code`, or the `enrolment` token
+/// of a sign-in that answered `MustEnrol` — answers the token and the options for `Passkey.Create`. Then the same call
+/// with `addToken` and the browser's answer in `addResponse` keeps the passkey, under `name`, and tells the owner by mail;
+/// for an enrolment it also answers the ticket, since the passkey IS the second step that sign-in was waiting for.
+/// Throws the sentence to show.
+[AuthMethod]
+public PasskeyAdding AddPasskey(string email, string password = "", string code = "", string passkeyToken = "",
+                                string passkeyResponse = "", string enrolment = "", string addToken = "",
+                                string addResponse = "", string name = "") {
+  var now = DateTime.UtcNow;
+  if (addToken == "") {
+    var owner = enrolment != "" ? Enrolling(enrolment) : ProvenOwner(email, password, code, passkeyToken, passkeyResponse);
+    if (PasskeyCredential.Count(p => p.Account == owner) >= PasskeysAllowed()) {
+      throw new ValidationException($"An account may have {PasskeysAllowed()} passkeys — remove one you no longer use first.");
+    }
+    var token = Security.RandomId(32);
+    new PasskeyCeremony { TokenHash = TokenHash(token), Account = owner, ForAdd = true, ExpiresAt = now + PasskeyLifetime() };
+    // The account's passkeys are excluded, so a device that already holds one is not registered twice.
+    var held = PasskeyCredential.Where(p => p.Account == owner).Select(p => p.CredentialId).ToList();
+    var options = WebAuthn.CreationOptions(token, PasskeySite(), AccountsAppName(), PasskeyHandle(owner), owner.Email,
+                                           owner.DisplayName, held);
+    return new PasskeyAdding { Token = token, Options = options };
+  }
+  var ceremony = PasskeyCeremony.FirstOrDefault(c => c.TokenHash == TokenHash(addToken));
+  if (ceremony == null || !ceremony.ForAdd || ceremony.UsedAt != null || ceremony.ExpiresAt < now || ceremony.Account == null
+      || !ceremony.Account.IsActive) {
+    throw new ValidationException("Adding that passkey took too long — start again.");
+  }
+  // Spent now, whatever the answer: a ceremony is answered once (SECURITY-INVARIANT accounts-passkey-challenge-single-use-expiring).
+  ceremony.UsedAt = now;
+  UnitOfWork.Commit();
+  var account = ceremony.Account!;
+  var made = JsonSerializer.Deserialize<PasskeyRegistered>(WebAuthn.Register(addResponse, addToken, PasskeyOrigin(), PasskeySite()));
+  if (PasskeyCredential.Any(p => p.CredentialId == made.CredentialId)) {
+    throw new ValidationException("That passkey is already on an account here.");
+  }
+  var ticket = "";
+  if (enrolment != "") {
+    if (Enrolling(enrolment).Id != account.Id) { throw new ValidationException("That sign-in has expired — start again from the sign-in page."); }
+    SpendEnrolment(enrolment);
+  }
+  var label = name.Trim() == "" ? "Passkey" : name.Trim();
+  new PasskeyCredential { Account = account, CredentialId = made.CredentialId, PublicKey = made.PublicKey,
+                          SignCount = made.SignCount, BackedUp = made.BackedUp, Name = label.Length > 80 ? label.Substring(0, 80) : label,
+                          CreatedAt = now };
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasskeyAdded(account, label));
+  if (enrolment != "") { ticket = Admit(account); }
+  return new PasskeyAdding { Ticket = ticket };
+}
+
+/// Remove the passkey `credentialId` from the account `email` names, given the same proof `AddPasskey` takes. Answers "",
+/// or throws the sentence to show. The owner is told by mail.
+///
+/// SECURITY-INVARIANT(accounts-the-last-way-in-is-never-removed): a passkey is removed only while the account keeps
+/// another way in — a password, another passkey, or a linked provider — and the password only while it keeps a passkey
+/// (`RemovePassword`); so no account can be left with nothing to sign in with, by its owner or by a borrowed session.
+/// Guarded by tests/passkeys.test.osy.
+[AuthMethod]
+public string RemovePasskey(string email, string credentialId, string password = "", string code = "", string passkeyToken = "",
+                            string passkeyResponse = "") {
+  var account = ProvenOwner(email, password, code, passkeyToken, passkeyResponse);
+  var key = PasskeyCredential.FirstOrDefault(p => p.Account == account && p.CredentialId == credentialId);
+  if (key == null) { throw new ValidationException("That passkey is not on your account."); }
+  if (WaysIn(account) <= 1) {
+    throw new ValidationException("That passkey is the only way into your account. Add another passkey — or set a password with \"Forgot your password?\" — before removing it.");
+  }
+  var label = key.Name;
+  key.Delete();
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasskeyRemoved(account, label));
+  return "";
+}
+
+/// Turn password sign-in OFF for the account `email` names: confirmed with one of its passkeys (`passkeyToken` +
+/// `passkeyResponse`) — which proves, at the same moment, that the account can sign in without the password. The
+/// password is REMOVED, not hidden, so no path that knows only passwords (this app's sign-in, the command line's, an
+/// operator's import) can sign the account in any more; every other session ends. Answers a fresh ticket for this one.
+/// The reset link (`RequestPasswordReset`) sets a password again — the way back when the passkeys are lost.
+[AuthMethod]
+[SuppressWarning("cost-unbounded-read")]   // one account's outstanding reset links
+public string RemovePassword(string email, string passkeyToken, string passkeyResponse) {
+  if (passkeyResponse == "") {
+    throw new ValidationException("Confirm with one of your passkeys — that is what you will sign in with once the password is gone.");
+  }
+  var account = ProvenOwner(email, "", "", passkeyToken, passkeyResponse);
+  var now = DateTime.UtcNow;
+  account.PasswordHash = null;
+  account.PasswordChangedAt = now;
+  account.PasswordSignInOff = true;
+  // A reset link asked for before this would put a password back: the ones outstanding are spent.
+  foreach (var reset in PasswordReset.Where(r => r.Account == account && r.UsedAt == null).ToList()) { reset.UsedAt = now; }
+  // SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change): a change of the account's way in.
+  Security.EndOtherSessions(account.Id);
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasswordRemoved(account));
+  return Security.IssueJwt(account.Id, account.Email);
+}
+
+/// Rename one of the signed-in account's passkeys. Runs as the account: it may rename only its own.
+[Server]
+public void RenamePasskey(string credentialId, string name) {
+  var me = Me();
+  if (me == null) { throw new ValidationException("Sign in first."); }
+  var key = PasskeyCredential.FirstOrDefault(p => p.Account == me && p.CredentialId == credentialId);
+  if (key == null) { throw new ValidationException("That passkey is not on your account."); }
+  var label = name.Trim();
+  if (label == "") { throw new ValidationException("Give it a name."); }
+  key.Name = label.Length > 80 ? label.Substring(0, 80) : label;
+}
+
+/// The signed-in account's passkeys, newest first, for its account page. Runs as the account itself.
+public PasskeysFacts MyPasskeys() {
+  var me = Me();
+  if (me == null) { return new PasskeysFacts(); }
+  var keys = PasskeyCredential.Where(p => p.Account == me).OrderByDescending(p => p.CreatedAt).ToList()
+    .Select(p => new PasskeyFacts { CredentialId = p.CredentialId, Name = p.Name, BackedUp = p.BackedUp,
+                                    CreatedAt = p.CreatedAt, LastUsedAt = p.LastUsedAt })
+    .ToList();
+  return new PasskeysFacts { Passkeys = keys, PasswordOff = me.PasswordSignInOff };
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// How long a passkey ceremony may take — the browser is told the same (`WebAuthn.TimeoutMs`).
+public TimeSpan PasskeyLifetime() { return TimeSpan.FromMinutes(5); }
+
+/// Passkeys an account may hold. Enough for every device a person has and a spare or two.
+public int PasskeysAllowed() { return 20; }
+
+/// The origin a passkey must have been used on — the app's own address, scheme, host and port.
+public string PasskeyOrigin() {
+  var u = new Uri(App.BaseUrl);
+  return u.Scheme + "://" + u.Authority;
+}
+
+/// The relying party a passkey is made for: the app's host. A passkey made here is offered by the browser here only.
+public string PasskeySite() { return new Uri(App.BaseUrl).Host; }
+
+/// The user handle a passkey of `account` carries — the account's id, which says nothing about the person.
+public string PasskeyHandle(User account) { return account.Id.ToString(); }
+
+/// How many ways into `account` there are: a password, each passkey, each linked provider.
+int WaysIn(User account) {
+  var ways = account.PasswordHash != null ? 1 : 0;
+  ways = ways + PasskeyCredential.Count(p => p.Account == account);
+  return ways + Security.OAuthLinkedProviders(account.Id).Count;
+}
+
+/// The passkey that answered the live sign-in or confirmation `token` with `response` — checked by `WebAuthn.Verify`,
+/// its counter and last use recorded. Spends the ceremony first, whatever the answer. Throws the sentence to show.
+PasskeyCredential Asserted(string token, string response) {
+  var now = DateTime.UtcNow;
+  var ceremony = PasskeyCeremony.FirstOrDefault(c => c.TokenHash == TokenHash(token));
+  if (ceremony == null || ceremony.ForAdd || ceremony.UsedAt != null || ceremony.ExpiresAt < now) {
+    throw new ValidationException("That passkey sign-in has expired — start again.");
+  }
+  ceremony.UsedAt = now;
+  UnitOfWork.Commit();
+  var id = WebAuthn.CredentialId(response);
+  var key = id == "" ? null : PasskeyCredential.FirstOrDefault(p => p.CredentialId == id);
+  if (key == null || !key.Account.IsActive) {
+    throw new ValidationException("That passkey does not sign in to an account here.");
+  }
+  key.SignCount = WebAuthn.Verify(response, key.PublicKey, key.SignCount, token, PasskeyOrigin(), PasskeySite(),
+                                  PasskeyHandle(key.Account));
+  key.LastUsedAt = now;
+  return key;
+}
+
+/// The account `email` names, proven to be its owner's: by one of its own passkeys (`passkeyToken` + `passkeyResponse`
+/// — a confirmation `StartPasskeySignIn` began), or by its password and, with two-step sign-in on, a current `code`. A
+/// passkey is both at once, so it needs no code. Throws the sentence to show.
+User ProvenOwner(string email, string password, string code, string passkeyToken, string passkeyResponse) {
+  if (passkeyResponse != "") {
+    var key = Asserted(passkeyToken, passkeyResponse);
+    if (key.Account.Email != NormalisedEmail(email)) { throw new ValidationException("That passkey is not one of this account's."); }
+    return key.Account;
+  }
+  var account = Verified(email, password);
+  if (account.TotpSecret != null) { RequireCode(account, code); }
+  return account;
+}

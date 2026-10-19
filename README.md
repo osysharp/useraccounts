@@ -42,7 +42,7 @@ component SignInPage() { render { MyFrame { SignInForm(); } } }
 
 | Forgotten password | The signed-in account page |
 |---|---|
-| ![Asking for a reset link](docs/forgot-password.png) | ![Changing the password and the address](docs/account.png) |
+| ![Asking for a reset link](docs/forgot-password.png) | ![One row per change: address, password, two-step sign-in, phone](docs/account.png) |
 
 Every colour, face and size on these pages is a theme token, so the app's own theme restyles them.
 
@@ -69,12 +69,14 @@ Every colour, face and size on these pages is a theme token, so the app's own th
 - **Erasing an account leaves no way in.** `EraseAccount(account)`, called from your erasure's run, clears the address,
   the name, the password, two-step sign-in, a phone, linked providers, roles, sessions, every link and code sent to it and
   the outbox's copies of that mail — and keeps the row, which work it did still names.
-- **One address, one account**, across every kind of account.
+- **One address, one account**, across every kind of account — and **one proven phone number, one account**: a number
+  another account has proven is refused before a code is sent, and again when one is typed.
 - **Sign-up gives only the roles the app chose** (`SignupRole`, and `FirstAccountRole` for the very first account),
   never one the visitor names. `SignupOpen = false` closes it.
 - **Changing the password needs the current one**, and the account is told by mail.
 - **The hash never reaches the audit trail.**
 - **With two-step sign-in on, a password alone signs nobody in** — see below.
+- **A passkey signs in with no password and no code**, and only on this app — see below.
 
 ## Two-step sign-in
 
@@ -122,7 +124,17 @@ app.Accounts = new AccountsSetup {
   SecondFactor = new SecondFactorPolicy(),   // derive to say who must use two-step sign-in
   AddressProof = new AddressProofPolicy(),   // derive to say whose address must be proven before a first sign-in
   LogoUrl = "",               // the app's mark on every sign-in screen: File.Url("public/brand/logo.svg"), or https
+  Marks = new ProviderMarks(), // derive to give a sign-in provider's buttons its own mark (GitHub, Google, Microsoft are built in)
 };
+```
+
+Every "Continue with …" and "Link …" button shows its provider's mark. GitHub, Google and Microsoft have theirs built in;
+any other provider shows the plain sign-in glyph until the app gives it one, from its own icons:
+
+```osy
+public class DeskMarks : ProviderMarks {
+  public override Icons For(string provider) { return provider == "Acme SSO" ? Icons.Acme : base.For(provider); }
+}
 ```
 
 ## Staff and their roles
@@ -174,6 +186,38 @@ app.Mail = new MailSetup {
 app.Secrets = [ new Secret("ResendApiKey") ];
 ```
 
+## Passkeys
+
+A passkey is a key pair the person's phone, laptop or security key makes for this app and unlocks with a PIN, a
+fingerprint or a face. It signs in with no address typed, no password and no code — it is both steps at once — and a
+look-alike page cannot collect it, because the browser offers it only to the app it was made for.
+
+Every app on the kit has it: "Sign in with a passkey" on the sign-in page (where the browser can make passkeys), and a
+**Passkeys** section on the account page to add several — the Mac, the phone, a hardware key in a drawer as the spare —
+name them, and remove them. An account the app requires two-step sign-in of may set a passkey up instead of an
+authenticator app. Once an account has a passkey it may **turn password sign-in off**: the password is removed, so
+nothing that knows only passwords (this app's sign-in, the command line's) can sign it in. A lost device is recovered by
+another passkey, or by "Forgot your password?", whose mailed link sets a password again.
+
+What holds:
+
+- **Every answer is checked against a challenge the sign-in flow minted** — kept as a hash, alive five minutes, spent by
+  the first answer that comes back, right or wrong. An add's challenge is never a sign-in's.
+- **The browser's answer must be for this app** — its origin and its host — **and the device must have checked the
+  person** (user verification is required, not preferred).
+- **A signature counter that does not move forward is refused** — the key may have been copied. (Synced passkeys report
+  zero every time, which is not a regression.)
+- **A passkey is one account's**: its id is unique here, and its user handle must be its account's.
+- **The last way in is never removed**: a passkey goes only while a password, another passkey or a linked provider
+  remains, and the password only while a passkey does.
+- **Adding or removing one takes proof** — the password (and a code, with two-step sign-in on), or one of the account's
+  passkeys — and mails the owner. A stranger who signed up first with somebody's address loses their passkey with
+  everything else the moment the owner proves the address.
+
+The checks a browser's answer needs — CBOR, COSE keys, ES256 / RS256 / EdDSA signatures — are the platform's
+(`WebAuthn.*`); the prompt is the browser's (`Passkey.Create`, `Passkey.Get`). Everything that decides about an account
+is this kit's `model/Passkeys.osy`, in Osy#.
+
 ## Building your own on top of it
 
 The pieces are separate on purpose. The forms (`SignInForm` — which carries the code step and the set-up step —
@@ -181,9 +225,11 @@ The pieces are separate on purpose. The forms (`SignInForm` — which carries th
 `SecondFactorEnrolment`, `RecoveryCodeList`) go in any frame of your own. The flows are ordinary functions — `SignIn`,
 `SignUp` (both answer a `SignInStep`: a ticket, a challenge, or "set it up first"), `SignInWithCode`, `RequestPasswordReset`,
 `ResetPassword`, `ChangePassword`, `ChangeEmail`, `VerifyEmail`, `EnableSecondFactor`, `DisableSecondFactor`,
-`NewRecoveryCodes` — and an app that states its own `app.AuthBootstrap` replaces the kit's wiring whole. A sign-in that is
+`NewRecoveryCodes`, `StartPasskeySignIn`, `SignInWithPasskey`, `AddPasskey`, `RemovePasskey`, `RemovePassword` — and an app that states its own `app.AuthBootstrap` replaces the kit's wiring whole. A sign-in that is
 not a password (a company's identity provider, a code by text message) builds on
 [Osysharp.Identity](https://osyrin.com/templates/kits/identity/) directly.
 
-Not in this version: signing in with a provider (OAuth), invitations, organisations, a user manager, and passkeys (they
-will be a second factor on the same challenge).
+**A door of your own** — say an application to a waitlist, with `SignupOpen = false` — is built from the kit's own
+pieces: `SignUpAtDoor` makes the account (answering a taken address exactly like a new one), `TextPhoneCode` and
+`ProvePhoneCode` prove a phone for the account your door has established, and `AccountsSetup.OwnDoor` sends a provider
+sign-in for an account your door has not finished with back to the door instead of signing it in.

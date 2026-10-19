@@ -47,6 +47,8 @@ public SignInStep SignInWithProvider(string pendingToken) {
   if (linked != null) {
     var mine = User.FirstOrDefault(u => u.Id == linked.Value);
     if (mine == null || !mine.IsActive) { return new SignInStep(); }
+    // The app's own door has not finished with this account: back to the door, which finishes it from the same seal.
+    if (App.Setting<AccountsSetup>().OwnDoor.Unfinished(mine)) { return new SignInStep { OwnDoor = true, Account = mine.Email }; }
     return ContinueSignIn(mine);
   }
   var verified = Security.VerifyPendingOAuthEmail(pendingToken);
@@ -140,14 +142,68 @@ public string UnlinkProvider(string email, string password, string provider, str
 public class ProviderFacts {
   public List<string> Linked = [];
   public List<string> Offered = [];
+  /// The mark each offered provider's button shows.
+  public List<ProviderMark> Marks = [];
 }
+
+/// The providers this app OFFERS for sign-in: declared in `app.OAuthClients` with `OAuthCapability.Login` AND able to sign
+/// somebody in on this installation — a client id, and a value for its secret. A provider declared before it is set up is
+/// not offered, so no "Continue with …" button sends a visitor to a provider that cannot finish. The one place every
+/// sign-in page and the account page read it, so a test states what is offered with
+/// `OfferedSignInProviders.Stub(() => new List<string> { "GitHub" })` rather than depending on whose secrets it runs with.
+public List<string> OfferedSignInProviders() { return Security.SignInProviders(); }
 
 /// The signed-in account's providers. Runs as the account itself: it answers only about its own.
 public ProviderFacts MyProviders() {
   var me = Me();
-  var facts = new ProviderFacts { Offered = Security.SignInProviders() };
+  var facts = new ProviderFacts { Offered = OfferedSignInProviders() };
+  facts.Marks = ProviderMarksOf(facts.Offered);
   if (me != null) { facts.Linked = Security.OAuthLinkedProviders(me.Id); }
   return facts;
+}
+
+/// The mark each provider's button shows — "Continue with …" on the sign-in page, "Link …" on the account page. The
+/// built-in marks cover GitHub, Google and Microsoft, so no app draws them; any other provider (an OpenID Connect one
+/// the app names itself) gets the plain sign-in glyph until the app says otherwise. To give one its own mark, derive
+/// and override `For`, falling back to the kit's answer:
+///
+///     public class DeskMarks : ProviderMarks {
+///       public override Icons For(string provider) { return provider == "Acme SSO" ? Icons.Acme : base.For(provider); }
+///     }
+///     app.Accounts = new AccountsSetup { …, Marks = new DeskMarks() };
+///
+/// `Icons.Acme` is the app's own `model/icons/acme.svg` — one icon vocabulary, the app's and the kit's together.
+public class ProviderMarks {
+  public virtual Icons For(string provider) {
+    var name = provider.ToLower();
+    if (name == "github") { return Icons.Github; }
+    if (name == "google") { return Icons.Google; }
+    if (name == "microsoft") { return Icons.Microsoft; }
+    return Icons.Login;
+  }
+}
+
+/// A provider and the mark its buttons show — what the pages are handed, so the setup itself stays on the server.
+public class ProviderMark {
+  public string Provider = "";
+  public Icons Mark = Icons.Login;
+}
+
+/// The mark a provider's button shows — the ONE mapping (`AccountsSetup.Marks`), so "Continue with …" on the sign-in
+/// page and "Link …" on the account page cannot drift apart.
+public Icons ProviderIcon(string provider) { return App.Setting<AccountsSetup>().Marks.For(provider); }
+
+/// Each of `providers` with its mark, for a page to draw from (`MarkOf`).
+public List<ProviderMark> ProviderMarksOf(List<string> providers) {
+  List<ProviderMark> marks = [];
+  foreach (var p in providers) { marks.Add(new ProviderMark { Provider = p, Mark = ProviderIcon(p) }); }
+  return marks;
+}
+
+/// The mark `provider` shows, from the marks a page was handed — the plain sign-in glyph for one it was not.
+public Icons MarkOf(List<ProviderMark> marks, string provider) {
+  foreach (var m in marks) { if (m.Provider == provider) { return m.Mark; } }
+  return Icons.Login;
 }
 
 /// Where a "Continue with …" button goes: the platform's provider sign-in, which comes back to `/oauth/sign-in`.

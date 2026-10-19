@@ -39,6 +39,12 @@ app.AuthBootstrap = new AuthBootstrap {
   PhoneVerify               = ProvePhone,
   PhoneSignIn               = SignInWithPhone,
   SmsSecondStep             = SetSmsSecondStep,
+  EmailDeliveryProblem      = AddressMailProblems,
+  PasskeyChallenge          = StartPasskeySignIn,
+  PasskeySignIn             = SignInWithPasskey,
+  PasskeyAdd                = AddPasskey,
+  PasskeyRemove             = RemovePasskey,
+  PasswordRemove            = RemovePassword,
 };
 
 // The fields that hold the login and the credential — what `osy user add` and the console sign-in read. The platform
@@ -93,6 +99,14 @@ bool MustProveAddress(User account) {
 /// a number to somebody else (NIST 800-63B "restricted"), so it is an account's choice, never an app's demand. Guarded by
 /// tests/sms.test.osy.
 public SignInStep ContinueSignIn(User account) {
+  // The address comes before the second factor, here as on the password door: an app's own door (an invitation that
+  // proves nothing about the address typed, say) ends here, so without this it would hand an unproven address a ticket
+  // that the kit's own `SignIn` refuses — SECURITY-INVARIANT(accounts-no-ticket-before-the-address-is-proven) holds on
+  // every door, not on the kit's alone. Guarded by tests/verify-code.test.osy (an app's door).
+  if (account.EmailVerifiedAt == null && MustProveAddress(account)) {
+    EnsureVerification(account);
+    return new SignInStep { MustVerify = true, Account = account.Email };
+  }
   if (account.TotpSecret != null) {
     var token = Security.RandomId(32);
     new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime() };
@@ -132,10 +146,18 @@ SignInStep MustEnrol(User account) {
 /// taken address signs its owner in instead of refusing them. Guarded by tests/verify-code.test.osy.
 [AuthMethod]
 public SignInStep SignUp(string email, string password, string name) {
-  var setup = App.Setting<AccountsSetup>();
-  if (!setup.SignupOpen) {
+  if (!App.Setting<AccountsSetup>().SignupOpen) {
     throw new ValidationException($"{AccountsAppName()} is not open for sign-up — ask the person who runs it for an account.");
   }
+  return SignUpAtDoor(email, password, name);
+}
+
+/// Make an account through an app's own door — an application form, a beta's front door — while the app is closed to
+/// ordinary sign-up (`SignupOpen = false`). It is `SignUp` without that one question, called from the app's own
+/// `[AuthMethod]` once it has decided its door is open: the same answer, the same mail, and the same guarantee that the
+/// answer never says which addresses already have an account (SECURITY-INVARIANT accounts-sign-up-does-not-say-who-has-an-account).
+public SignInStep SignUpAtDoor(string email, string password, string name) {
+  var setup = App.Setting<AccountsSetup>();
   var address = NormalisedEmail(email);
   if (!LooksLikeEmail(address)) { throw new ValidationException("That does not look like an email address."); }
   var problem = PasswordProblem(password, address);
@@ -252,6 +274,13 @@ public string ResetPassword(string token, string password) {
   Security.EndOtherSessions(account.Id);
   account.PasswordHash = Security.HashPassword(password);
   account.PasswordChangedAt = now;
+  // The way back for an account whose passkeys are lost: the mailed link sets a password, and password sign-in is on
+  // again — told by mail, since it re-opens a door the owner had closed. No ticket: the person signs in as usual.
+  if (account.PasswordSignInOff) {
+    account.PasswordSignInOff = false;
+    SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasswordChanged(account));
+    return "";
+  }
   if (account.TotpSecret != null || TextedSecondStep(account)) { return ""; }
   // An account the app requires two-step sign-in of, and that has none yet, is not signed in by a mailed link either:
   // the password is set and it signs in as usual, which takes it through setting the factor up.
@@ -278,13 +307,15 @@ public string ChangePassword(string email, string currentPassword, string newPas
 }
 
 /// Ask to move the account to a new address, given the current password — and, when two-step sign-in is on, a current
-/// `code`: an address is how a password is reset, so moving it is as sensitive as the password. Nothing changes yet: a
-/// link goes to the NEW address, and the account moves when it is opened; the OLD address is told. Asking for the
-/// account's own address sends a fresh verification of it. Answers "", or throws the sentence to show.
+/// `code`: an address is how a password is reset, so moving it is as sensitive as the password. One of the account's
+/// passkeys (`passkeyToken` + `passkeyResponse`, a confirmation `StartPasskeySignIn` began) proves it instead — the only
+/// proof an account with password sign-in off has. Nothing changes yet: a link goes to the NEW address, and the account
+/// moves when it is opened; the OLD address is told. Asking for the account's own address sends a fresh verification of
+/// it. Answers "", or throws the sentence to show.
 [AuthMethod]
-public string ChangeEmail(string email, string currentPassword, string newEmail, string code = "") {
-  var account = Verified(email, currentPassword);
-  if (account.TotpSecret != null) { RequireCode(account, code); }
+public string ChangeEmail(string email, string currentPassword, string newEmail, string code = "",
+                          string passkeyToken = "", string passkeyResponse = "") {
+  var account = ProvenOwner(email, currentPassword, code, passkeyToken, passkeyResponse);
   var address = NormalisedEmail(newEmail);
   if (!LooksLikeEmail(address)) { throw new ValidationException("That does not look like an email address."); }
   if (address == account.Email) {
@@ -297,6 +328,24 @@ public string ChangeEmail(string email, string currentPassword, string newEmail,
   return "";
 }
 
+/// What the account page shows of the signed-in account's address: the address, whether it is proven, and — while a
+/// change waits for its confirmation — the address it is moving to (`Pending`), "" when none.
+public class AddressFacts {
+  public string Email = "";
+  public bool Proven = false;
+  public string Pending = "";
+}
+
+/// The signed-in account's `AddressFacts`; empty for nobody signed in.
+public AddressFacts MyAddress() {
+  var me = Me();
+  if (me == null) { return new AddressFacts(); }
+  var now = DateTime.UtcNow;
+  var pending = EmailCheck.Where(c => c.Account == me && c.IsChange && c.UsedAt == null && c.ExpiresAt > now && c.Email != me.Email)
+    .OrderByDescending(c => c.ExpiresAt).FirstOrDefault();
+  return new AddressFacts { Email = me.Email, Proven = me.EmailVerifiedAt != null, Pending = pending == null ? "" : pending.Email };
+}
+
 /// Mail a fresh link that proves the account's address, when the address has an active account that has not proven
 /// it yet — what "send me a new link" and an operator's "resend" ask for. Answers "" whether or not it did anything,
 /// so it never tells a stranger which addresses have accounts; asked twice within a minute, it mails once.
@@ -304,10 +353,35 @@ public string ChangeEmail(string email, string currentPassword, string newEmail,
 public string RequestVerification(string email) {
   var account = User.FirstOrDefault(u => u.Email == NormalisedEmail(email));
   if (account == null || !account.IsActive || account.EmailVerifiedAt != null || IsManaged(account)) { return ""; }
+  // A system account's address is one no message reaches — there is nobody to prove it.
+  if (IsUnreachableAddress(account.Email)) { return ""; }
   var aMinuteAgo = DateTime.UtcNow + VerificationLifetime() - TimeSpan.FromMinutes(1);
   if (EmailCheck.Any(c => c.Account == account && !c.IsChange && c.UsedAt == null && c.ExpiresAt > aMinuteAgo)) { return ""; }
   SendCheck(account, account.Email, false);
   return "";
+}
+
+/// Whether the mail carrier reported that mail to `email` in the last few days (a verification's lifetime) could not be
+/// delivered — "" when it did not, else the sentence to show ("Mail to ann@x.com bounced (…)."). What the address step
+/// and an operator's list of unproven addresses ask, so nobody waits for a code that will never come. It needs the
+/// carrier's reports (Osysharp.Mail.Resend's `ResendDeliveryReported`); without them it answers "".
+///
+/// It says something about an ADDRESS, never about an account: a sign-up mails any address it is given (a code, or
+/// "you already have an account"), so whether mail to an address bounces is no clue to who has an account here.
+string AddressMailProblem(string email) {
+  var undelivered = UndeliveredTo(NormalisedEmail(email), DateTime.UtcNow - VerificationLifetime());
+  return undelivered == null ? "" : UndeliveredSentence(undelivered);
+}
+
+/// `AddressMailProblem` for each of `emails`, in order — "" for an address whose mail was not reported undeliverable.
+/// The `EmailDeliveryProblem` slot, so the address step can ask before anybody is signed in (it reads the outbox, which
+/// only the sign-in flow may); a list, so an operator's page of unproven addresses asks once. At most 200 addresses.
+[AuthMethod]
+public List<string> AddressMailProblems(List<string> emails) {
+  if (emails.Count > 200) { throw new ValidationException("Ask about at most 200 addresses at once."); }
+  List<string> answers = [];
+  foreach (var e in emails) { answers.Add(AddressMailProblem(e)); }
+  return answers;
 }
 
 /// Open a verification link: prove the address it went to, and — for an address change — move the account to it.
@@ -319,6 +393,14 @@ public string RequestVerification(string email) {
 public SignInStep VerifyEmail(string token, string password = "", string newPassword = "") {
   var check = EmailCheck.FirstOrDefault(c => c.TokenHash == TokenHash(token));
   var now = DateTime.UtcNow;
+  // A spent link whose address the account now uses, proven: what it asked for has happened — by this link opened
+  // before, or by another link or code for the same thing (proving one spends the rest, so two presses of "Change
+  // address" leave one link that works and one that answers here). Said only of the address the token was MAILED to,
+  // and only while it is still the account's — so the holder learns nothing a mail to that address did not tell them.
+  if (check != null && check.Account.IsActive && check.UsedAt != null && check.Email == check.Account.Email
+      && check.Account.EmailVerifiedAt != null) {
+    return new SignInStep { Proven = true, AlreadyProven = true, Account = check.Email };
+  }
   if (check == null || check.UsedAt != null || check.ExpiresAt < now || !check.Account.IsActive) {
     throw new ValidationException("That link has expired or was already used — sign in to have a new one sent.");
   }
@@ -394,7 +476,7 @@ SignInStep Claim(EmailCheck check, string password, string newPassword) {
 }
 
 /// Clear every way into `account` that was set up before its address was proven — by whoever held the password then:
-/// the password, two-step sign-in and its recovery codes, a phone and its texted step, every linked provider, and every
+/// the password, two-step sign-in and its recovery codes, every passkey, a phone and its texted step, every linked provider, and every
 /// outstanding challenge, reset link and code. What the account's rows ARE (its name, its roles, its work) stays.
 [SuppressWarning("cost-unbounded-read")]   // one account's outstanding codes, links and challenges, spent at once
 void StartOver(User account) {
@@ -409,6 +491,10 @@ void StartOver(User account) {
   account.Phone = null;
   account.PhoneVerifiedAt = null;
   account.SmsSecondStep = false;
+  account.PasswordSignInOff = false;
+  // …and every passkey: a stranger who signed up first could have added one of their own.
+  foreach (var key in PasskeyCredential.Where(p => p.Account == account).ToList()) { key.Delete(); }
+  foreach (var ceremony in PasskeyCeremony.Where(c => c.Account == account && c.UsedAt == null).ToList()) { ceremony.UsedAt = now; }
   foreach (var code in RecoveryCode.Where(c => c.Account == account && c.UsedAt == null).ToList()) { code.UsedAt = now; }
   foreach (var challenge in SignInChallenge.Where(c => c.Account == account && c.UsedAt == null).ToList()) { challenge.UsedAt = now; }
   foreach (var reset in PasswordReset.Where(r => r.Account == account && r.UsedAt == null).ToList()) { reset.UsedAt = now; }
@@ -465,7 +551,9 @@ public void ConfirmAddressChange(EmailCheck check) {
 // ── helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /// The account `email` names, when `password` is its password — else throws, having spent a verification either way.
-User Verified(string email, string password) {
+/// PUBLIC for an app's own door: an `[AuthMethod]` that takes an address and a password it must check before it acts
+/// (an application form, say) asks this rather than spending a sign-in.
+public User Verified(string email, string password) {
   var account = User.FirstOrDefault(u => u.Email == NormalisedEmail(email));
   if (account == null || !account.IsActive || account.PasswordHash == null) {
     Security.VerifyPassword(password);

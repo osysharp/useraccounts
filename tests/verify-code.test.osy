@@ -4,6 +4,7 @@
 
 using Osysharp.Identity;
 using Osysharp.UserAccounts;
+using Osysharp.Mail;
 
 [TestFixture]
 void Signups() {
@@ -29,8 +30,11 @@ void the_verification_mail_carries_a_link_and_a_code_and_the_code_proves_the_add
   // Receiving the mail is proof enough to be signed in, as a reset link is.
   Assert.NotEqual("", step.Ticket);
   runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "new@desk.test").EmailVerifiedAt); }
-  // …and the link that travelled with it is spent: the address is settled.
-  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail(token)); }
+  // …and the link that travelled with it is spent: the address is settled, and opening it signs nobody in.
+  SignInStep link = new SignInStep();
+  runas (AuthBootstrap) { link = VerifyEmail(token, "a-long-password"); }
+  Assert.True(link.AlreadyProven);
+  Assert.Equal("", link.Ticket);
 }
 
 [Test(Signups)]
@@ -177,4 +181,55 @@ void a_code_is_kept_only_as_a_keyed_fingerprint_and_nobody_signed_in_makes_one()
     Assert.Denied(() => new OneTimeCode { Account = User.Single(u => u.Email == "ada@desk.test"), Destination = "ada@desk.test",
                                           CodeHash = "known", Nonce = "n", ExpiresAt = DateTime.UtcNow.AddMinutes(5) });
   }
+}
+
+// ── An app's own door (an invitation, an application form) ends in `ContinueSignIn` — and an unproven address gets the
+//    step that proves it there too, never a ticket (SECURITY-INVARIANT accounts-no-ticket-before-the-address-is-proven).
+[Test(Signups)]
+void an_apps_own_door_asks_an_unproven_address_for_its_proof_too() {
+  RequireProof();
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) {
+    var door = new User { Email = "door@desk.test", DisplayName = "Door", PasswordHash = Security.HashPassword("a-long-password") };
+    step = ContinueSignIn(door);
+  }
+  Assert.Equal("", step.Ticket);
+  Assert.True(step.MustVerify);
+  Assert.Equal("door@desk.test", step.Account);
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("door@desk.test"); }
+  Assert.Equal(6, code.Length);
+  // A proven address goes on through the same door to its ticket.
+  runas (AuthBootstrap) { step = ContinueSignIn(User.Single(u => u.Email == "ada@desk.test")); }
+  Assert.NotEqual("", step.Ticket);
+}
+
+// ── WHEN THE MAIL DID NOT ARRIVE (somebody waits for a code mailed to an address with no
+//    mailbox). The carrier's report that mail to an address bounced reaches the address step, which says so instead of
+//    leaving somebody to wait; a later delivered message to the address clears it.
+[TestFixture]
+void Reported() {
+  new OutgoingMail { To = "gone@desk.test", Subject = "Confirm your address", MessageId = "<a1@desk.test>",
+                     SentWith = "resend", ProviderId = "re-gone" };
+  new OutgoingMail { To = "fine@desk.test", Subject = "Confirm your address", MessageId = "<a2@desk.test>",
+                     SentWith = "resend", ProviderId = "re-fine" };
+}
+
+[Test(Reported)]
+void a_bounce_the_carrier_reports_is_what_the_address_step_is_told() {
+  string before = "x";
+  runas (AuthBootstrap) { before = AddressMailProblems(["gone@desk.test"])[0]; }
+  Assert.Equal("", before);
+
+  Raise(new MailDeliveryReported { SentWith = "resend", ProviderId = "re-gone", Outcome = MailDelivery.Bounced,
+                                   Detail = "Permanent General: no such mailbox" });
+  Raise(new MailDeliveryReported { SentWith = "resend", ProviderId = "re-fine", Outcome = MailDelivery.Delivered });
+  UnitOfWork.Commit();
+  Background.Settle();
+
+  string gone = "";
+  string fine = "x";
+  runas (AuthBootstrap) { var both = AddressMailProblems([" Gone@Desk.test", "fine@desk.test"]); gone = both[0]; fine = both[1]; }
+  Assert.Equal("Mail to gone@desk.test bounced (Permanent General: no such mailbox).", gone);
+  Assert.Equal("", fine);
 }

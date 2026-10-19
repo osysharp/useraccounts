@@ -3,7 +3,7 @@
 // Sign in (with the same time spent on every miss), sign up (which an app can close), a forgotten password (a mailed,
 // hashed, single-use token that lapses in an hour), a changed password, a changed address (confirmed from the new
 // address before it takes effect, and one the app's desk can start for somebody whose old address is gone), address verification, two-step sign-in (an authenticator app's code after the
-// password, recovery codes, and the app's say over who must use it), and the pages for all of them in the app's own
+// password, recovery codes, and the app's say over who must use it), passkeys (both steps at once), and the pages for all of them in the app's own
 // theme. Its mail goes through Osysharp.Mail, so an app with no mail provider yet still works — the mail waits in the
 // outbox.
 //
@@ -18,9 +18,10 @@
 //   account; only hashes of mailed tokens are stored. An app customises by DERIVING (`entity Employee : User { … }`) and
 //   by restyling the theme, and neither can loosen any of it.
 package Osysharp.UserAccounts {
-  version     "1.1.0";
-  minPlatform "0.9.0";
-  summary     "sign-in (password, or a provider such as Google or GitHub, linked from the account page), sign-up, password reset and change, verified address change (one the desk can start, confirmed from the new address) and verification, an address proven by a mailed link or code, two-step sign-in with an authenticator app and recovery codes, a phone number proven by a texted code (to sign in with, or as an optional second step), and accounts made for somebody who never signs in (a child, a walk-in) by whoever the app names, given an address later — with pages — on Osysharp.Identity. Staff are given their roles with Osysharp.UserManagement.";
+  version     "1.2.0";
+  // Passkeys need the platform's `WebAuthn.*` checks, the browser's `Passkey.*` verbs and the five passkey sign-in slots.
+  minPlatform "0.14.0";
+  summary     "sign-in (password, or a provider such as Google or GitHub, linked from the account page), sign-up, password reset and change, verified address change (one the desk can start, confirmed from the new address) and verification, an address proven by a mailed link or code, two-step sign-in with an authenticator app and recovery codes, passkeys (several per account, to sign in with no password and no code, and to turn password sign-in off), a phone number proven by a texted code (to sign in with, or as an optional second step), and accounts made for somebody who never signs in (a child, a walk-in) by whoever the app names, given an address later — with pages — on Osysharp.Identity. Staff are given their roles with Osysharp.UserManagement.";
   // What an app using this kit usually adds next — `osy compose` and `osy lock` say it when the app does not.
   pairsWith   "Osysharp.UserManagement: an app with more than one role adds it so managers give staff their roles and take them back, with a record of who changed what";
   model "model/**/*.osy";

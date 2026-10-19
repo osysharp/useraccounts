@@ -42,12 +42,15 @@ public component AccountsFrame(string heading, string sub = "", string logo = ""
 }
 
 /// Sign in — the password, then, for an account with two-step sign-in, a code; or, for an account the app requires it
-/// of and that has not set it up, setting it up. `then` is where to go afterwards when the visitor was not on their way
+/// of and that has not set it up, setting it up (an authenticator app, or a passkey). Or a passkey, which is both steps
+/// at once and needs no address typed. `then` is where to go afterwards when the visitor was not on their way
 /// somewhere. `email` and `password` prefill the fields (a demo's working account, say).
 [Composable]
 public component SignInForm(string then = "", string email = "", string password = "") {
   AccountsFacts facts = new AccountsFacts();
-  on mount { facts = AccountsPageFacts(); }
+  // Whether this browser can use passkeys at all — the passkey buttons show only where they can work.
+  bool passkeys = false;
+  on mount { facts = AccountsPageFacts(); passkeys = Passkey.Supported(); }
   string address = email;
   string secret = password;
   string problem = "";
@@ -92,6 +95,33 @@ public component SignInForm(string then = "", string email = "", string password
 
   action UseText() { problem = ""; byText = true; codeSent = false; code = ""; }
 
+  /// A passkey: the browser offers the ones it holds for this app, the device checks it is the person, and that is the
+  /// whole sign-in. A closed prompt is nothing happening, said nowhere.
+  action SignInWithAPasskey() {
+    problem = "";
+    try {
+      var start = StartPasskeySignIn();
+      var answer = Passkey.Get(start.Options);
+      if (answer == "") { return; }
+      Take(SignInWithPasskey(start.Token, answer));
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
+  /// Setting a passkey up in place of an authenticator app, for an account that must have a second step: the passkey IS
+  /// that step, so keeping it signs the person in.
+  action EnrolAPasskey() {
+    problem = "";
+    try {
+      var first = AddPasskey("", "", "", "", "", enrolment);
+      var made = Passkey.Create(first.Options);
+      if (made == "") { return; }
+      var done = AddPasskey("", "", "", "", "", enrolment, first.Token, made, "Passkey");
+      Session.SignIn(done.Ticket, then != "" ? then : facts.HomePath);
+    }
+    catch (Exception ex) { problem = ex.Message; }
+  }
+
   action ContinueWith(string provider) { Navigation.Open(ProviderSignInAddress(provider), sameTab: true); }
 
   action SubmitCode() {
@@ -114,6 +144,11 @@ public component SignInForm(string then = "", string email = "", string password
       if (enrolling) {
         Alert($"{facts.AppName} asks for two-step sign-in on your account. Set it up now — it takes a minute.", tone: Tone.Default);
         SecondFactorEnrolment(address, "", then != "" ? then : facts.HomePath, enrolment: enrolment);
+        if (passkeys) {
+          Text("Or use a passkey — your phone, laptop or a security key signs you in, with no code to type.", color: Colors.TextMuted);
+          Button("Set up a passkey instead", onPress: EnrolAPasskey, size: Size.Lg);
+        }
+        if (problem != "") { Alert(problem, tone: Tone.Danger); }
         Button("Back to sign in", onPress: StartAgain, tone: Tone.Ghost);
       } else if (proving) {
         // The password the sign-in just verified goes with the code — so its owner is not asked for it again.
@@ -147,11 +182,12 @@ public component SignInForm(string then = "", string email = "", string password
         Field("Password", value: secret, type: "password", onEnter: Submit);
         if (problem != "") { Alert(problem, tone: Tone.Danger); }
         Button("Sign in", onPress: Submit, tone: Tone.Primary, size: Size.Lg);
+        if (passkeys) { Button("Sign in with a passkey", onPress: SignInWithAPasskey, size: Size.Lg); }
         if (facts.Providers.Count > 0) {
           Stack(gap: 2) {
             Text("or", color: Colors.TextMuted, fontSize: FontSize.Label, textAlign: TextAlign.Center);
             foreach (var p in facts.Providers) {
-              Button($"Continue with {p}", onPress: () => ContinueWith(p), size: Size.Lg);
+              Button($"Continue with {p}", onPress: () => ContinueWith(p), size: Size.Lg) { Icon(MarkOf(facts.Marks, p), size: 18); }
             }
           }
         }
@@ -195,7 +231,7 @@ public component SecondFactorEnrolment(string email, string password, string the
     Stack(gap: 3) {
       if (codes.Count == 0) {
         Text("1. Scan this with an authenticator app — Google Authenticator, Microsoft Authenticator, 1Password, or any other.");
-        if (setup.Qr.Count > 0) { AccountsQrCode(setup.Qr); }
+        if (setup.Qr.Count > 0) { QrCode(setup.Qr, label: "QR code for your authenticator app"); }
         Stack(gap: 1) {
           Text("Or type this key into the app:", fontSize: FontSize.Label, color: Colors.TextMuted);
           Text(KeyInGroups(setup.Key), fontFamily: Font.Mono, fontWeight: FontWeight.Semibold, letterSpacing: "0.04em");
@@ -228,41 +264,6 @@ public component RecoveryCodeList(List<string> codes) {
       }
     }
   }
-}
-
-/// A QR code's rows (`Qr.Encode`) drawn as modules — dark on white whatever the theme, with a quiet margin of four
-/// modules: a reader looks for dark squares on a light ground, so this is the one place the screens do not take the
-/// theme's colours.
-[Composable]
-public component AccountsQrCode(List<string> rows, int module = 4) {
-  render {
-    Box(bg: "#ffffff", p: $"{module * 4}px", w: "fit-content", maxW: "100%", rounded: Radius.Md,
-        label: "QR code for your authenticator app") {
-      Stack(gap: 0) {
-        foreach (var row in rows) {
-          Row(gap: 0, h: $"{module}px") {
-            foreach (var run in QrRuns(row)) {
-              Box(w: $"{Math.Abs(run) * module}px", h: $"{module}px", shrink: 0, bg: run > 0 ? "#111111" : "#ffffff");
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-/// A row of QR modules as its runs, left to right: a dark run's length positive, a light one's negative.
-List<int> QrRuns(string row) {
-  List<int> runs = [];
-  var i = 0;
-  while (i < row.Length) {
-    var c = row.Substring(i, 1);
-    var j = i;
-    while (j < row.Length && row.Substring(j, 1) == c) { j = j + 1; }
-    runs.Add(c == "1" ? j - i : i - j);
-    i = j;
-  }
-  return runs;
 }
 
 /// A key in groups of four, as it is easiest to read off a screen and type (the app ignores the spaces).
@@ -341,6 +342,15 @@ public component AddressCodeStep(string address, string then, string password = 
   string problem = "";
   SignInStep next = new SignInStep();
   bool resent = false;
+  /// The carrier's word that mail to the address did not arrive (it bounced, was marked as spam, or is held back) —
+  /// asked when the step opens and again while it waits, because the report comes seconds after the send.
+  string undelivered = "";
+
+  on mount { undelivered = AddressMailProblems([address])[0]; }
+
+  on every (TimeSpan.FromSeconds(10)) {
+    if (!next.MustConfirmPassword && !next.MustEnrol && next.Challenge == "") { undelivered = AddressMailProblems([address])[0]; }
+  }
 
   action Confirm() {
     problem = "";
@@ -351,7 +361,7 @@ public component AddressCodeStep(string address, string then, string password = 
     catch (Exception ex) { problem = ex.Message; code = ""; }
   }
 
-  action Resend() { RequestVerification(address); resent = true; }
+  action Resend() { RequestVerification(address); resent = true; undelivered = AddressMailProblems([address])[0]; }
 
   render {
     Stack(gap: 3) {
@@ -362,7 +372,16 @@ public component AddressCodeStep(string address, string then, string password = 
       } else if (next.Challenge != "") {
         SecondFactorCodeStep(next.Challenge, then);
       } else {
-        Alert($"Check your mail at {address}. It says what comes next — a six-digit code to type here, or a link to open.", tone: Tone.Default);
+        // It names the address, and says this step CONFIRMS it: read as a second sign-in step, a code that never came
+        // looks like a broken sign-in rather than a mailbox to check (measured 2026-10-13, an operator on an address
+        // with no mailbox).
+        Alert($"Check your mail at {address}.", title: "Confirm your email address", tone: Tone.Default);
+        Text("The mail says what comes next — a six-digit code to type here, or a link to open. Either one confirms that the address is yours; this is not a second sign-in step.",
+             color: Colors.TextMuted);
+        if (undelivered != "") {
+          Alert($"{undelivered} No code will arrive there — if the address is wrong, go back and use the right one.",
+                title: "The mail did not arrive", tone: Tone.Danger);
+        }
         Field("Code from the mail", value: code, placeholder: "123 456", onEnter: Confirm);
         if (problem != "") { Alert(problem, tone: Tone.Danger); }
         Button("Confirm", onPress: Confirm, tone: Tone.Primary, size: Size.Lg);
@@ -455,6 +474,9 @@ public component VerifyEmailResult(string token) {
       if (!done) { Text("Confirming…", color: Colors.TextMuted); }
       else if (problem == "" && step.MustConfirmPassword) {
         ConfirmPasswordStep(token, step.Account, "", facts.HomePath);
+      } else if (problem == "" && step.AlreadyProven) {
+        Alert($"Your account already uses {step.Account} — nothing more to do.", tone: Tone.Success);
+        TextLink("Continue", to: facts.HomePath);
       } else if (problem == "") {
         Alert($"{step.Account} is confirmed.", tone: Tone.Success);
         TextLink("Continue", to: facts.HomePath);
@@ -524,229 +546,459 @@ public component ConfirmPasswordStep(string token, string address, string code, 
   }
 }
 
-/// A signed-in person's sign-in details: their address and whether it is confirmed, a new password, a new address, and
-/// two-step sign-in. Every change asks for the current password — and, with two-step sign-in on, a current code: see the
-/// notes in SignIn.osy and SecondFactor.osy.
+/// A signed-in person's sign-in details, one row each — their address, their password, two-step sign-in, a phone (when
+/// the app keeps numbers) and the providers they sign in with: what it is, what it is now, and one button. The button
+/// opens a dialog holding only that change; Save then asks, as a second step in the same dialog, for the current
+/// password — and, with two-step sign-in on, a code from the app, typed last so it is fresh. Nothing is sent before that,
+/// and a wrong password or code keeps what was typed and asks again. See the notes in SignIn.osy and SecondFactor.osy for
+/// why every change asks for them.
+/// In a test press a row's button, fill the dialog, press Save, then fill "Current password" (and "Code from your app")
+/// and press Confirm: `Ui.Click("Change address…"); Ui.Fill("New address", "…"); Ui.Click("Save"); …`.
 [Composable]
 public component AccountSettings() {
   AccountsFacts facts = new AccountsFacts();
   SecondFactorFacts twoStep = new SecondFactorFacts();
-  on mount { facts = AccountsPageFacts(); twoStep = MySecondFactor(); }
+  AddressFacts address = new AddressFacts();
+  ProviderFacts providers = new ProviderFacts();
+  PhoneFacts phone = new PhoneFacts();
+  PasskeysFacts keys = new PasskeysFacts();
+  bool passkeys = false;
+  on mount {
+    facts = AccountsPageFacts(); twoStep = MySecondFactor(); address = MyAddress(); providers = MyProviders(); phone = MyPhone();
+    keys = MyPasskeys(); passkeys = Passkey.Supported();
+  }
   var me = Session.CurrentUser;
+
+  // The change being made: "" (none), "address", "password", "two-step-on", "recovery-codes", "two-step-off",
+  // "phone", "phone-remove", "texted-on", "texted-off", "unlink" (`provider`), "passkey-add", "passkey-rename" and
+  // "passkey-remove" (`passkeyId`) or "password-remove". Each opens its dialog.
+  string change = "";
+  // Where its dialog is: "edit" (the change itself), "confirm" (the password and code), "text" (a code texted to the
+  // phone), "enrol" (setting up the app) or "codes" (new recovery codes, shown once).
+  string step = "";
+  string provider = "";
+  // The passkey a rename or a removal is of, and the name a new or renamed one gets.
+  string passkeyId = "";
+  string passkeyName = "";
+  string newEmail = "";
+  string newPassword = "";
+  string newPhone = "";
   string current = "";
   string code = "";
-  string newPassword = "";
-  string newEmail = "";
+  string textedCode = "";
+  // Which confirm field takes the keyboard as the step opens: the password, or — when it is already typed — the code.
+  bool codeFirst = false;
+  List<string> codes = [];
   string note = "";
   string problem = "";
-  bool enrolling = false;
-  List<string> codes = [];
-  ProviderFacts providers = new ProviderFacts();
-  on mount { providers = MyProviders(); }
-  PhoneFacts phone = new PhoneFacts();
-  on mount { phone = MyPhone(); }
-  string newPhone = "";
-  string textedCode = "";
-  bool phoneCodeSent = false;
-  bool stepOffCodeSent = false;
 
-  action SendPhoneCode() {
-    note = ""; problem = "";
-    try { ProvePhone(Session.CurrentUser.Email, current, newPhone); phoneCodeSent = true; textedCode = ""; }
-    catch (Exception ex) { problem = ex.Message; }
+  action Open(string which) {
+    change = which; problem = ""; note = ""; code = ""; textedCode = "";
+    // A change with nothing to edit goes straight to its confirmation.
+    step = which == "address" || which == "password" || which == "phone" || which == "passkey-add" || which == "passkey-rename"
+      ? "edit" : "confirm";
+    codeFirst = false;
   }
 
-  action ConfirmPhone() {
-    note = ""; problem = "";
-    try {
-      ProvePhone(Session.CurrentUser.Email, current, newPhone, textedCode, code);
-      phone = MyPhone(); phoneCodeSent = false; textedCode = ""; code = ""; newPhone = "";
-      note = $"Your number {phone.Number} is confirmed.";
+  action OpenUnlink(string p) { provider = p; Open("unlink"); }
+
+  action OpenPasskey(string which, PasskeyFacts k) { passkeyId = k.CredentialId; passkeyName = k.Name; Open(which); }
+
+  action Resend() { newEmail = address.Pending; Open("address"); step = "confirm"; }
+
+  action Close() {
+    change = ""; step = ""; provider = ""; current = ""; code = ""; textedCode = ""; problem = ""; codes = [];
+    newEmail = ""; newPassword = ""; newPhone = ""; passkeyId = ""; passkeyName = "";
+  }
+
+  action Save() {
+    problem = "";
+    if (change == "address" && newEmail.Trim() == "") { problem = "Type the address to move to."; return; }
+    if (change == "password" && newPassword == "") { problem = "Type the new password."; return; }
+    if (change == "phone" && newPhone.Trim() == "") { problem = "Type the number."; return; }
+    if (change == "passkey-rename") {
+      // A name is not a way in: renaming asks for nothing more.
+      try { RenamePasskey(passkeyId, passkeyName); Done("The passkey is renamed."); }
+      catch (Exception ex) { problem = ex.Message; }
+      return;
     }
-    catch (Exception ex) { problem = ex.Message; }
+    code = "";
+    codeFirst = current != "";
+    step = "confirm";
   }
 
-  action RemovePhone() {
-    note = ""; problem = "";
-    try { ProvePhone(Session.CurrentUser.Email, current, "", "", code); phone = MyPhone(); code = ""; note = "Your phone number is removed."; }
-    catch (Exception ex) { problem = ex.Message; }
+  action Back() { problem = ""; code = ""; step = "edit"; }
+
+  // A refusal keeps everything typed — the change, the password — and empties the code, which is spent or stale.
+  action Refused(string why) { problem = why; code = ""; codeFirst = current != ""; }
+
+  action Done(string said) {
+    twoStep = MySecondFactor(); address = MyAddress(); providers = MyProviders(); phone = MyPhone(); keys = MyPasskeys();
+    Close();
+    note = said;
   }
 
-  action TextedStepOn() {
-    note = ""; problem = "";
-    try { SetSmsSecondStep(Session.CurrentUser.Email, current, true); phone = MyPhone(); note = "Signing in now asks for a code texted to your phone."; }
-    catch (Exception ex) { problem = ex.Message; }
-  }
-
-  action TextedStepOff() {
-    note = ""; problem = "";
+  action Confirm() {
+    problem = "";
+    var who = Session.CurrentUser.Email;
     try {
-      var answer = SetSmsSecondStep(Session.CurrentUser.Email, current, false, textedCode);
-      if (answer == "sent") { stepOffCodeSent = true; textedCode = ""; return; }
-      phone = MyPhone(); stepOffCodeSent = false; textedCode = ""; note = "Texted sign-in codes are off.";
+      if (change == "address") {
+        ChangeEmail(who, current, newEmail, code);
+        var to = newEmail.Trim().ToLower();
+        // A move needs no note: the address row now says where the confirmation went.
+        Done(to == address.Email ? $"A new link to confirm {address.Email} is on its way." : "");
+      } else if (change == "password") {
+        // The session stays signed in: its ticket is still good, and moving the page under the person would lose the note.
+        ChangePassword(who, current, newPassword, code);
+        Done("Your password is changed.");
+      } else if (change == "two-step-on") {
+        if (current == "") { Refused("Type your current password."); return; }
+        step = "enrol";
+      } else if (change == "recovery-codes") {
+        codes = NewRecoveryCodes(who, current, code);
+        twoStep = MySecondFactor();
+        code = ""; current = "";
+        step = "codes";
+      } else if (change == "two-step-off") {
+        DisableSecondFactor(who, current, code);
+        twoStep = MySecondFactor();
+        // An account that must use it moves to another phone this way: off, then set up again at once.
+        if (twoStep.Required) { code = ""; change = "two-step-on"; step = "enrol"; } else { Done("Two-step sign-in is off."); }
+      } else if (change == "phone") {
+        ProvePhone(who, current, newPhone);
+        textedCode = ""; code = ""; step = "text";
+      } else if (change == "phone-remove") {
+        ProvePhone(who, current, "", "", code);
+        Done("Your phone number is removed.");
+      } else if (change == "texted-on") {
+        SetSmsSecondStep(who, current, true);
+        Done("Signing in now asks for a code texted to your phone.");
+      } else if (change == "texted-off") {
+        SetSmsSecondStep(who, current, false);
+        textedCode = ""; step = "text";
+      } else if (change == "unlink") {
+        UnlinkProvider(who, current, provider, code);
+        Done($"{provider} no longer signs in to your account.");
+      } else if (change == "passkey-add") {
+        AddThePasskey("", "");
+      } else if (change == "passkey-remove") {
+        RemovePasskey(who, passkeyId, current, code);
+        Done($"\"{passkeyName}\" no longer signs in to your account.");
+      } else if (change == "password-remove") {
+        Refused("Confirm with one of your passkeys — that is what you will sign in with.");
+      }
     }
-    catch (Exception ex) { problem = ex.Message; }
+    catch (Exception ex) { Refused(ex.Message); }
   }
 
-  action LinkWith(string provider) { Navigation.Open(ProviderSignInAddress(provider), sameTab: true); }
-
-  action Unlink(string provider) {
-    note = ""; problem = "";
+  /// "Is it you?" answered by one of the account's passkeys instead of the password (and code) — for the passkey
+  /// changes, and the only answer turning password sign-in off takes.
+  action ConfirmWithPasskey() {
+    problem = "";
+    var who = Session.CurrentUser.Email;
     try {
-      UnlinkProvider(Session.CurrentUser.Email, current, provider, code);
-      code = "";
-      providers = MyProviders();
-      note = $"{provider} no longer signs in to your account.";
+      var start = StartPasskeySignIn();
+      var answer = Passkey.Get(start.Options);
+      if (answer == "") { return; }
+      if (change == "passkey-add") {
+        AddThePasskey(start.Token, answer);
+      } else if (change == "passkey-remove") {
+        RemovePasskey(who, passkeyId, "", "", start.Token, answer);
+        Done($"\"{passkeyName}\" no longer signs in to your account.");
+      } else if (change == "address") {
+        ChangeEmail(who, "", newEmail, "", start.Token, answer);
+        var to = newEmail.Trim().ToLower();
+        Done(to == address.Email ? $"A new link to confirm {address.Email} is on its way." : "");
+      } else if (change == "password-remove") {
+        RemovePassword(who, start.Token, answer);
+        Done("Password sign-in is off. You sign in with your passkeys.");
+      }
     }
-    catch (Exception ex) { problem = ex.Message; }
+    catch (Exception ex) { Refused(ex.Message); }
   }
 
-  action SavePassword() {
-    note = ""; problem = "";
-    // The session stays signed in: its ticket is still good, and moving the page under the person would lose the note.
+  /// The two halves of adding a passkey, once it is confirmed it is you — by the password and code, or by a passkey's
+  /// `token` and `answer`.
+  action AddThePasskey(string token, string answer) {
+    var who = Session.CurrentUser.Email;
+    var first = AddPasskey(who, token == "" ? current : "", token == "" ? code : "", token, answer);
+    var made = Passkey.Create(first.Options);
+    if (made == "") { Refused("Nothing was added — the passkey prompt was closed."); return; }
+    AddPasskey(who, "", "", "", "", "", first.Token, made, passkeyName);
+    Done("Your passkey is added. It signs you in from now on.");
+  }
+
+  // The last step of a phone change and of turning texted codes off: the code the phone was sent.
+  action ConfirmText() {
+    problem = "";
+    var who = Session.CurrentUser.Email;
     try {
-      ChangePassword(Session.CurrentUser.Email, current, newPassword, code);
-      current = ""; newPassword = ""; code = ""; note = "Your password is changed.";
+      if (change == "phone") {
+        ProvePhone(who, current, newPhone, textedCode, code);
+        Done($"Your number {MyPhone().Number} is confirmed.");
+      } else {
+        SetSmsSecondStep(who, current, false, textedCode);
+        Done("Texted sign-in codes are off.");
+      }
     }
+    catch (Exception ex) { problem = ex.Message; textedCode = ""; code = ""; }
+  }
+
+  action SendNewLink() {
+    note = ""; problem = "";
+    try { RequestVerification(address.Email); note = $"A new link to confirm {address.Email} is on its way."; }
     catch (Exception ex) { problem = ex.Message; }
   }
 
-  action StartTwoStep() {
-    note = ""; problem = "";
-    if (current == "") { problem = "Type your current password first — setting up two-step sign-in asks for it."; return; }
-    enrolling = true;
-  }
-
-  action NewCodes() {
-    note = ""; problem = "";
-    try { codes = NewRecoveryCodes(Session.CurrentUser.Email, current, code); code = ""; twoStep = MySecondFactor(); }
-    catch (Exception ex) { problem = ex.Message; }
-  }
-
-  action TurnOff() {
-    note = ""; problem = "";
-    try {
-      DisableSecondFactor(Session.CurrentUser.Email, current, code);
-      code = ""; codes = [];
-      twoStep = MySecondFactor();
-      // An account that must use it moves to another phone this way: off, then set up again at once.
-      if (twoStep.Required) { enrolling = true; } else { note = "Two-step sign-in is off."; current = ""; }
-    }
-    catch (Exception ex) { problem = ex.Message; }
-  }
-
-  action MoveAddress() {
-    note = ""; problem = "";
-    try {
-      ChangeEmail(Session.CurrentUser.Email, current, newEmail, code);
-      note = newEmail.Trim().ToLower() == me.Email
-        ? $"A new link to confirm {me.Email} is on its way."
-        : $"We have sent a link to {newEmail}. Your account moves to it when you open it.";
-      current = ""; code = "";
-    }
-    catch (Exception ex) { problem = ex.Message; }
-  }
+  action LinkWith(string p) { Navigation.Open(ProviderSignInAddress(p), sameTab: true); }
 
   render {
     Stack(gap: 4) {
       if (me != null) {
-        Stack(gap: 1) {
-          Text(me.Email, fontWeight: FontWeight.Semibold);
-          if (me.EmailVerifiedAt == null) { Badge("Not confirmed", tone: Tone.Warning); }
-          else { Badge("Confirmed", tone: Tone.Success); }
-        }
-        Field("Current password", value: current, type: "password", hint: "Needed for every change below.");
-        if (twoStep.On) {
-          Field("Code from your app", value: code, placeholder: "123 456",
-                hint: "Needed too, with two-step sign-in on. A recovery code works as well.");
-        }
-        Divider();
-        Field("New password", value: newPassword, type: "password",
-              hint: $"At least {facts.MinPasswordLength} characters.");
-        Button("Change password", onPress: SavePassword);
-        Divider();
-        Field("New address", value: newEmail, type: "email", hint: "Or your own address, to have a new confirmation link sent.");
-        Button("Change address", onPress: MoveAddress);
-        Divider();
-        Stack(gap: 2) {
-          Row(gap: 2, align: Align.Center) {
-            Text("Two-step sign-in", fontWeight: FontWeight.Semibold);
-            if (twoStep.On) { Badge("On", tone: Tone.Success); } else { Badge("Off", tone: Tone.Default); }
-          }
-          if (enrolling) {
-            SecondFactorEnrolment(me.Email, current, "/account");
-          } else if (!twoStep.On) {
-            Text("After your password, signing in asks for a code from an authenticator app on your phone — so a stolen password is not enough.",
-                 color: Colors.TextMuted);
-            if (twoStep.Required) { Alert($"{facts.AppName} asks for two-step sign-in on your account.", tone: Tone.Warning); }
-            Button("Set up two-step sign-in", onPress: StartTwoStep);
-          } else {
-            Text($"Signing in asks for a code from your app. {twoStep.RecoveryCodesLeft} recovery codes left.", color: Colors.TextMuted);
-            Row(gap: 2, wrap: Wrapping.Wrap) {
-              Button("New recovery codes", onPress: NewCodes);
-              Button(twoStep.Required ? "Move to another phone" : "Turn off two-step sign-in", onPress: TurnOff);
-            }
-            if (codes.Count > 0) { RecoveryCodeList(codes); }
-          }
-        }
-        if (facts.Phones) {
-          Divider();
-          Stack(gap: 2) {
-            Row(gap: 2, align: Align.Center) {
-              Text("Phone", fontWeight: FontWeight.Semibold);
-              if (phone.Proven) { Badge("Confirmed", tone: Tone.Success); }
-            }
-            if (phone.Proven) { Text(phone.Number); }
-            Field(phone.Proven ? "New number" : "Phone number", value: newPhone, type: "tel", placeholder: "+46 70 123 45 67",
-                  hint: "With its country code. We text it a code to confirm it is yours.");
-            if (phoneCodeSent) {
-              Field("Code from the text", value: textedCode, placeholder: "123 456", onEnter: ConfirmPhone);
-              Button("Confirm number", onPress: ConfirmPhone, tone: Tone.Primary);
-            } else {
-              Button("Text me a code", onPress: SendPhoneCode);
-            }
-            if (phone.Proven && !phone.SecondStep) { Button("Remove the number", onPress: RemovePhone, tone: Tone.Ghost); }
-            if (facts.SmsSecondStep && phone.Proven && !twoStep.On) {
-              if (phone.SecondStep) {
-                Text("Signing in asks for a code texted to this number after your password.", color: Colors.TextMuted);
-                if (stepOffCodeSent) {
-                  Field("Code from the text", value: textedCode, placeholder: "123 456", onEnter: TextedStepOff);
-                  Button("Turn off texted codes", onPress: TextedStepOff);
-                } else {
-                  Button("Turn off texted codes", onPress: TextedStepOff);
-                }
-              } else {
-                Text("Or have a code texted to this number each time you sign in. An authenticator app is stronger — a number can be moved to somebody else's SIM.",
-                     color: Colors.TextMuted);
-                Button("Text me a code when I sign in", onPress: TextedStepOn);
-              }
-            }
-          }
-        }
-        if (providers.Offered.Count > 0) {
-          Divider();
-          Stack(gap: 2) {
-            Text("Sign in with", fontWeight: FontWeight.Semibold);
-            foreach (var p in providers.Offered) {
-              Row(gap: 2, align: Align.Center, wrap: Wrapping.Wrap) {
-                Text(p, grow: 1);
-                if (providers.Linked.Contains(p)) {
-                  Badge("Linked", tone: Tone.Success);
-                  Button("Unlink", onPress: () => Unlink(p), size: Size.Sm);
-                } else {
-                  Button($"Link {p}", onPress: () => LinkWith(p), size: Size.Sm);
-                }
-              }
-            }
-            Text("Unlinking asks for your current password. Signed up with a provider and have none? Choose one with a link from the sign-in page's \"Forgot your password?\".",
-                 color: Colors.TextMuted, fontSize: FontSize.Label);
-          }
-        }
         if (note != "") { Alert(note, tone: Tone.Success); }
-        if (problem != "") { Alert(problem, tone: Tone.Danger); }
+        if (problem != "" && change == "") { Alert(problem, tone: Tone.Danger); }
+        Stack(gap: 0) {
+          SettingsSection("Address", description: "Where your mail goes, and how you sign in.") {
+            Stack(gap: 3, pb: 5) {
+            Row(gap: 2, align: Align.Center, wrap: Wrapping.Wrap) {
+              Text(address.Email != "" ? address.Email : me.Email, fontWeight: FontWeight.Semibold);
+              if (address.Proven) { Badge("Confirmed", tone: Tone.Success); } else { Badge("Not confirmed", tone: Tone.Warning); }
+            }
+            if (address.Pending != "") {
+              Text($"Confirmation sent to {address.Pending}", color: Colors.TextMuted);
+              Text("Your account moves to it when the link in that mail is opened.", fontSize: FontSize.Caption, color: Colors.TextMuted);
+              Row(gap: 2) { Button("Resend", onPress: Resend); }
+            } else {
+              Row(gap: 2, wrap: Wrapping.Wrap) {
+                Button("Change address…", onPress: () => Open("address"));
+                if (!address.Proven) { Button("Send a new link", onPress: SendNewLink, tone: Tone.Ghost); }
+              }
+            }
+            }
+          }
+          SettingsSection("Password", description: "What you sign in with, after your address.") {
+            Stack(gap: 3, pb: 5) {
+            if (keys.PasswordOff) {
+              Row(gap: 2, align: Align.Center) { Badge("Off", tone: Tone.Default); Text("You sign in with your passkeys.", color: Colors.TextMuted); }
+              Text("Lost every device with a passkey? \"Forgot your password?\" on the sign-in page mails you a link that sets one again.",
+                   fontSize: FontSize.Caption, color: Colors.TextMuted);
+            } else {
+              Row(gap: 2) { Button("Change password…", onPress: () => Open("password")); }
+            }
+            }
+          }
+          SettingsSection("Passkeys", description: "Your phone, your laptop or a security key signs you in — no password, no code.") {
+            Stack(gap: 3, pb: 5) {
+            if (keys.Passkeys.Count == 0) { Text("No passkeys yet.", color: Colors.TextMuted); }
+            foreach (var k in keys.Passkeys) {
+              Row(gap: 2, align: Align.Center, wrap: Wrapping.Wrap) {
+                Stack(gap: 0, grow: 1) {
+                  Text(k.Name, fontWeight: FontWeight.Semibold);
+                  Text(PasskeyLine(k), fontSize: FontSize.Caption, color: Colors.TextMuted);
+                }
+                if (k.BackedUp) { Badge("Synced", tone: Tone.Default); }
+                Button("Rename…", onPress: () => OpenPasskey("passkey-rename", k), size: Size.Sm, tone: Tone.Ghost);
+                Button("Remove…", onPress: () => OpenPasskey("passkey-remove", k), size: Size.Sm, tone: Tone.Ghost);
+              }
+            }
+            Row(gap: 2, wrap: Wrapping.Wrap) {
+              if (passkeys) { Button("Add a passkey…", onPress: () => Open("passkey-add")); }
+              if (passkeys && keys.Passkeys.Count > 0 && !keys.PasswordOff) {
+                Button("Turn off password sign-in…", onPress: () => Open("password-remove"), tone: Tone.Ghost);
+              }
+            }
+            if (!passkeys) { Text("This browser cannot make passkeys.", fontSize: FontSize.Caption, color: Colors.TextMuted); }
+            }
+          }
+          SettingsSection("Two-step sign-in", description: "A code from an app on your phone after your password, so a stolen password is not enough.") {
+            Stack(gap: 3, pb: 5) {
+            Row(gap: 2, align: Align.Center) {
+              if (twoStep.On) { Badge("On", tone: Tone.Success); } else { Badge("Off", tone: Tone.Default); }
+              if (twoStep.On) { Text($"{twoStep.RecoveryCodesLeft} recovery codes left", color: Colors.TextMuted); }
+            }
+            // A passkey is both steps at once, so an account the app requires a second step of is not owed one while it has a passkey.
+            if (!twoStep.On && twoStep.Required && keys.Passkeys.Count == 0) { Alert($"{facts.AppName} asks for two-step sign-in on your account.", tone: Tone.Warning); }
+            Row(gap: 2, wrap: Wrapping.Wrap) {
+              if (!twoStep.On) {
+                Button("Set up two-step sign-in…", onPress: () => Open("two-step-on"));
+              } else {
+                Button("New recovery codes…", onPress: () => Open("recovery-codes"));
+                Button(twoStep.Required ? "Move to another phone…" : "Turn off two-step sign-in…", onPress: () => Open("two-step-off"),
+                       tone: Tone.Ghost);
+              }
+            }
+            }
+          }
+          if (facts.Phones) {
+            SettingsSection("Phone", description: "With its country code. A text proves it is yours.") {
+              Stack(gap: 3, pb: 5) {
+              Row(gap: 2, align: Align.Center) {
+                if (phone.Number != "" && phone.Proven) {
+                  Text(phone.Number, fontWeight: FontWeight.Semibold);
+                  Badge("Confirmed", tone: Tone.Success);
+                } else { Text("No number", color: Colors.TextMuted); }
+              }
+              if (phone.SecondStep) { Text("Signing in asks for a code texted to this number.", color: Colors.TextMuted); }
+              Row(gap: 2, wrap: Wrapping.Wrap) {
+                Button(phone.Proven ? "Change number…" : "Add a number…", onPress: () => Open("phone"));
+                if (phone.Proven && !phone.SecondStep) { Button("Remove the number…", onPress: () => Open("phone-remove"), tone: Tone.Ghost); }
+                if (facts.SmsSecondStep && phone.Proven && !twoStep.On) {
+                  if (phone.SecondStep) { Button("Turn off texted codes…", onPress: () => Open("texted-off"), tone: Tone.Ghost); }
+                  else { Button("Text me a code when I sign in…", onPress: () => Open("texted-on"), tone: Tone.Ghost); }
+                }
+              }
+              }
+            }
+          }
+          if (providers.Offered.Count > 0) {
+            SettingsSection("Sign in with", description: "Another account that signs you in here.") {
+              Stack(gap: 3, pb: 5) {
+              foreach (var p in providers.Offered) {
+                Row(gap: 2, align: Align.Center, wrap: Wrapping.Wrap) {
+                  Text(p, grow: 1);
+                  if (providers.Linked.Contains(p)) {
+                    Badge("Linked", tone: Tone.Success);
+                    Button("Unlink…", onPress: () => OpenUnlink(p), size: Size.Sm);
+                  } else {
+                    Button($"Link {p}", onPress: () => LinkWith(p), size: Size.Sm) { Icon(MarkOf(providers.Marks, p), size: 14); }
+                  }
+                }
+              }
+              }
+            }
+          }
+        }
+        if (change != "") {
+          Dialog(ChangeTitle(change, provider, phone.Proven), onDismiss: Close) {
+            Stack(gap: 3) {
+              if (step == "edit" && change == "address") {
+                Field("New address", value: newEmail, type: "email", onEnter: Save,
+                      hint: "We mail it a link; your account moves to it when the link is opened.");
+              } else if (step == "edit" && change == "password") {
+                Field("New password", value: newPassword, type: "password", onEnter: Save,
+                      hint: $"At least {facts.MinPasswordLength} characters.");
+              } else if (step == "edit" && (change == "passkey-add" || change == "passkey-rename")) {
+                Field("Name", value: passkeyName, placeholder: "MacBook, iPhone, YubiKey", onEnter: Save,
+                      hint: change == "passkey-add" ? "So you can tell your passkeys apart. Your device asks you to confirm next." : "");
+              } else if (step == "edit" && change == "phone") {
+                Field("Phone number", value: newPhone, type: "tel", placeholder: "+46 70 123 45 67", onEnter: Save,
+                      hint: "With its country code. We text it a code to confirm it is yours.");
+              } else if (step == "confirm") {
+                Text(ConfirmLine(change, newEmail, newPhone, provider), color: Colors.TextMuted);
+                if (change == "password-remove" || (keys.PasswordOff && IsPasskeyChange(change))) {
+                  // Nothing to type: one of the account's passkeys says it is you.
+                } else if (twoStep.On && AsksForCode(change)) {
+                  Field("Current password", value: current, type: "password", autoFocus: !codeFirst);
+                  Field("Code from your app", value: code, placeholder: "123 456", autoFocus: codeFirst, onEnter: Confirm,
+                        hint: "Type it last, so it is fresh. A recovery code works as well.");
+                } else {
+                  Field("Current password", value: current, type: "password", autoFocus: true, onEnter: Confirm);
+                }
+              } else if (step == "text") {
+                Text(change == "phone" ? $"We texted a code to {newPhone}." : "We texted a code to your number.", color: Colors.TextMuted);
+                if (twoStep.On && change == "phone") {
+                  Field("Code from the text", value: textedCode, placeholder: "123 456", autoFocus: true);
+                  Field("Code from your app", value: code, placeholder: "123 456", onEnter: ConfirmText,
+                        hint: "Type it last, so it is fresh. A recovery code works as well.");
+                } else {
+                  Field("Code from the text", value: textedCode, placeholder: "123 456", autoFocus: true, onEnter: ConfirmText);
+                }
+              } else if (step == "enrol") {
+                SecondFactorEnrolment(me.Email, current, "/account");
+              } else if (step == "codes") {
+                RecoveryCodeList(codes);
+              }
+              if (problem != "") { Alert(problem, tone: Tone.Danger); }
+            }
+            slot actions {
+              if (step == "edit") {
+                Button("Cancel", onPress: Close, tone: Tone.Ghost);
+                Button("Save", onPress: Save, tone: Tone.Primary);
+              } else if (step == "confirm") {
+                if (change == "address" || change == "password" || change == "phone") {
+                  Button("Back", onPress: Back, tone: Tone.Ghost);
+                } else {
+                  Button("Cancel", onPress: Close, tone: Tone.Ghost);
+                }
+                if (IsPasskeyChange(change) && passkeys && keys.Passkeys.Count > 0) {
+                  Button(change == "password-remove" || keys.PasswordOff ? "Confirm with a passkey" : "Use a passkey instead",
+                         onPress: ConfirmWithPasskey, tone: change == "password-remove" || keys.PasswordOff ? Tone.Primary : Tone.Default);
+                }
+                if (change != "password-remove" && !(keys.PasswordOff && IsPasskeyChange(change))) {
+                  Button(change == "phone" || change == "texted-off" ? "Text me a code" : "Confirm", onPress: Confirm, tone: Tone.Primary);
+                }
+              } else if (step == "text") {
+                Button("Cancel", onPress: Close, tone: Tone.Ghost);
+                Button("Confirm", onPress: ConfirmText, tone: Tone.Primary);
+              } else if (step == "codes") {
+                Button("I have saved them", onPress: () => Done(""), tone: Tone.Primary);
+              } else {
+                Button("Cancel", onPress: Close, tone: Tone.Ghost);
+              }
+            }
+          }
+        }
       }
     }
   }
+}
+
+/// The title of the account page's dialog for `change`.
+string ChangeTitle(string change, string provider, bool hasPhone) {
+  if (change == "address") { return "Change address"; }
+  if (change == "password") { return "Change password"; }
+  if (change == "two-step-on") { return "Set up two-step sign-in"; }
+  if (change == "recovery-codes") { return "New recovery codes"; }
+  if (change == "two-step-off") { return "Turn off two-step sign-in"; }
+  if (change == "phone") { return hasPhone ? "Change number" : "Add a number"; }
+  if (change == "phone-remove") { return "Remove the number"; }
+  if (change == "texted-on") { return "Texted sign-in codes"; }
+  if (change == "texted-off") { return "Turn off texted codes"; }
+  if (change == "passkey-add") { return "Add a passkey"; }
+  if (change == "passkey-rename") { return "Rename the passkey"; }
+  if (change == "passkey-remove") { return "Remove the passkey"; }
+  if (change == "password-remove") { return "Turn off password sign-in"; }
+  return $"Unlink {provider}";
+}
+
+/// What the confirmation step says it confirms.
+string ConfirmLine(string change, string newEmail, string newPhone, string provider) {
+  if (change == "address") { return $"To move your account to {newEmail.Trim()}, confirm it is you."; }
+  if (change == "password") { return "To save your new password, confirm it is you."; }
+  if (change == "two-step-on") { return "To set up two-step sign-in, confirm it is you."; }
+  if (change == "recovery-codes") { return "New codes replace the ones you have. Confirm it is you."; }
+  if (change == "two-step-off") { return "To turn off two-step sign-in, confirm it is you."; }
+  if (change == "phone") { return $"To add {newPhone.Trim()}, confirm it is you — then we text it a code."; }
+  if (change == "phone-remove") { return "To remove your number, confirm it is you."; }
+  if (change == "texted-on") { return "Signing in will ask for a code texted to your phone. Confirm it is you."; }
+  if (change == "texted-off") { return "To turn texted codes off, confirm it is you — then we text you a code."; }
+  if (change == "passkey-add") { return "To add a passkey, confirm it is you — then your device makes it."; }
+  if (change == "passkey-remove") { return "To remove this passkey, confirm it is you."; }
+  if (change == "password-remove") {
+    return "Your password is removed, and you sign in with your passkeys. Confirm with one of them — it proves it works.";
+  }
+  return $"To stop {provider} signing you in, confirm it is you.";
+}
+
+/// Does confirming `change` ask for a code from the app (with two-step sign-in on)? A phone change asks for it at its
+/// last step, with the texted code; setting up two-step sign-in and texted codes happen only while it is off.
+bool AsksForCode(string change) {
+  return change == "address" || change == "password" || change == "recovery-codes" || change == "two-step-off"
+         || change == "phone-remove" || change == "unlink" || change == "passkey-add" || change == "passkey-remove";
+}
+
+/// Is `change` one a passkey may confirm in place of the password? The address is one: it is how an account with
+/// password sign-in off is recovered, so that account must be able to move it.
+bool IsPasskeyChange(string change) {
+  return change == "passkey-add" || change == "passkey-remove" || change == "password-remove" || change == "address";
+}
+
+/// When a passkey was added, and when it last signed in.
+string PasskeyLine(PasskeyFacts k) {
+  var added = k.CreatedAt.ToString("d MMM yyyy");
+  if (k.LastUsedAt == null) { return $"Added {added}"; }
+  var used = k.LastUsedAt.Value.ToString("d MMM yyyy");
+  return $"Added {added} · last used {used}";
 }
 
 /// The code step of a sign-in: the authenticator app's six digits (or a recovery code) for `challenge`, then signed in
@@ -810,7 +1062,7 @@ public component ProviderSignIn(string then = "", bool ownDoor = false) {
       try {
         step = SignInWithProvider(pendingToken);
         if (step.Ticket != "") { Session.SignIn(step.Ticket, then != "" ? then : facts.HomePath); }
-        else if (step.NoAccount) { noAccount = true; }
+        else if (step.NoAccount || step.OwnDoor) { noAccount = true; }
         else if (!step.MustEnrol && step.Challenge == "") { problem = "That sign-in did not match an account that may sign in here."; }
       }
       catch (Exception ex) { problem = ex.Message; }

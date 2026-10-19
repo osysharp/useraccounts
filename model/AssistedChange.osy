@@ -70,6 +70,15 @@ public void ChangeAddressFor(User account, string newAddress, string reason) {
   new AddressChangeRequest { Account = account, NewAddress = address, Reason = reason.Trim() };
 }
 
+/// The desk's recorded change moves the account to its new address — one of the three ways an account's address changes
+/// (`User`'s `deny update Email except via …`). Called by the change's own run and by nothing else: in a request, where
+/// the caller is asked, Osysharp.Identity's `deny update Email when !IsAuthenticator` refuses the desk's own context.
+[Server, Authorize(ChangesAccountsFor)]
+void MoveAccountForTheDesk(AddressChangeRequest change) {
+  var account = change.Account;
+  account.Email = change.NewAddress;
+}
+
 /// Moves the account and tells both addresses — as the system, in the commit that made the change.
 public workflow AssistedAddressChange {
   Tracks    = AddressChangeRequest.State;
@@ -81,7 +90,7 @@ public workflow AssistedAddressChange {
       var account = this.Item.Account;
       var old = account.Email;
       this.Item.OldAddress = old;
-      account.Email = this.Item.NewAddress;
+      MoveAccountForTheDesk(this.Item);
       // The desk vouched for the person, so the new address is not left waiting on a proof nobody asked for.
       account.EmailVerifiedAt = DateTime.UtcNow;
       // A change the person had asked for themselves, to some other address, would move it again when its link is

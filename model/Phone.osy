@@ -33,18 +33,32 @@ public string ProvePhone(string email, string password, string phone, string cod
     }
     return "";
   }
-  var number = NormalisedPhone(phone);
-  if (number == "") {
-    throw new ValidationException("Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67.");
-  }
-  if (User.Any(u => u.Phone == number && u.PhoneVerifiedAt != null && u.Id != account.Id)) {
-    throw new ValidationException("Another account already uses that number.");
-  }
   if (code.Trim() == "") {
-    TextCode(account, CodePurpose.ProvePhone, number);
+    TextPhoneCode(account, phone);
     return "sent";
   }
   if (account.TotpSecret != null) { RequireCode(account, twoStepCode); }
+  ProvePhoneCode(account, phone, code);
+  return "";
+}
+
+/// Text `account` a code that proves `phone`, and answer the number as the kit keeps it (E.164) — for an app's own door:
+/// an `[AuthMethod]` that has established who this is in its own way (a provider's sealed sign-in, an application it is
+/// completing) and must prove a number for that account, where `ProvePhone` would ask for a password the account may not
+/// have. Texted at most once a minute and five times an hour, like every code. Throws the sentence to show for a number
+/// with no country code, or one another account has already proven.
+public string TextPhoneCode(User account, string phone) {
+  var number = NumberThisAccountMayProve(account, phone);
+  TextCode(account, CodePurpose.ProvePhone, number);
+  return number;
+}
+
+/// Record `phone` as `account`'s, proven by the `code` that `TextPhoneCode` (or `ProvePhone`) texted to it — the other half
+/// of an app's own door. A wrong or spent code is a wrong try against the account, kept, and the sentence thrown; a right
+/// one records the number and tells the account's address. Throws, too, for a number another account has proven since
+/// the code was sent.
+public void ProvePhoneCode(User account, string phone, string code) {
+  var number = NumberThisAccountMayProve(account, phone);
   var match = CodeMatching(LiveCodesOf(account, CodePurpose.ProvePhone, number), code);
   if (match == null) {
     UnitOfWork.Commit();   // the miss is kept: the throw below would discard it
@@ -53,8 +67,27 @@ public string ProvePhone(string email, string password, string phone, string cod
   // Moving the texted second step to a new number moves the step with it: the new number was just proven.
   account.Phone = number;
   account.PhoneVerifiedAt = DateTime.UtcNow;
-  SendRendered(account.Email, setup.Mails.PhoneChanged(account, number, true));
-  return "";
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PhoneChanged(account, number, true));
+}
+
+/// `phone` as the kit keeps it, when the app keeps numbers and this one may be `account`'s.
+///
+/// SECURITY-INVARIANT(accounts-one-account-per-proven-number): a number proven by one account is never proven by another —
+/// every way a number is proven (`ProvePhone`, an app's door through `ProvePhoneCode`) asks here first, before a code is
+/// texted and again when it is typed. So a number already in use cannot be texted a code on another account's behalf, and
+/// a code typed after somebody else proved the number records nothing; two proofs that race past this check are settled
+/// by `User.Phone`'s `[Unique]`. Guarded by tests/sms.test.osy
+/// (a_number_another_account_has_proven_is_refused_at_an_apps_door_too).
+string NumberThisAccountMayProve(User account, string phone) {
+  if (!PhonesOffered()) { throw new ValidationException($"{AccountsAppName()} does not keep phone numbers."); }
+  var number = NormalisedPhone(phone);
+  if (number == "") {
+    throw new ValidationException("Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67.");
+  }
+  if (User.Any(u => u.Phone == number && u.PhoneVerifiedAt != null && u.Id != account.Id)) {
+    throw new ValidationException("Another account already uses that number.");
+  }
+  return number;
 }
 
 /// Sign in with a code texted to a proven number, in place of the password — when the app offers it (`SmsSignIn`). With no

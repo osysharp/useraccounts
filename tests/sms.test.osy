@@ -214,3 +214,50 @@ void a_reset_link_does_not_sign_in_an_account_with_a_texted_step() {
   runas (AuthBootstrap) { ticket = ResetPassword(token, "a-brand-new-pass"); }
   Assert.Equal("", ticket);
 }
+
+// ⭐ AN APP'S OWN DOOR PROVES A NUMBER FOR AN ACCOUNT IT HAS ESTABLISHED (`TextPhoneCode` + `ProvePhoneCode`) — no password
+//    asked, because the door has already said who this is (an account made by a provider's sign-in has no password at all).
+//    The same codes, the same wrong-try rule, and the number recorded only by the right code.
+[Test(Phones)]
+void an_apps_own_door_proves_a_number_without_a_password() {
+  string kept = "";
+  runas (AuthBootstrap) { kept = TextPhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46 70 000 00 01"); }
+  Assert.Equal("+46700000001", kept);
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000001"); }
+  Assert.Equal(6, code.Length);
+  var wrong = code == "000000" ? "111111" : "000000";
+  runas (AuthBootstrap) { Assert.Throws(() => ProvePhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46700000001", wrong)); }
+  runas (Ada) { Assert.Null(Me()!.Phone); }
+  runas (AuthBootstrap) { ProvePhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46700000001", code); }
+  runas (Ada) {
+    Assert.Equal("+46700000001", MyPhone().Number);
+    Assert.True(MyPhone().Proven);
+  }
+}
+
+// SECURITY-INVARIANT(accounts-one-account-per-proven-number): a number Bo has proven is never texted a code on Ada's
+// behalf, at an app's door as at the account page — and the database refuses a second account holding it whatever path
+// writes it, which is what settles two proofs that raced past the check.
+[Test(Phones)]
+void a_number_another_account_has_proven_is_refused_at_an_apps_door_too() {
+  int before = 0;
+  runas (AuthBootstrap) { before = TextsTo("+46700000002"); }
+  runas (AuthBootstrap) {
+    var e = Assert.Throws(() => TextPhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46 70 000 00 02"));
+    Assert.Contains("Another account already uses that number", e.Message);
+  }
+  runas (AuthBootstrap) { Assert.Equal(before, TextsTo("+46700000002")); }   // nothing was texted
+  var refused = false;
+  runas (AuthBootstrap) {
+    try {
+      SetPhone("ada@desk.test", "+46700000002");
+      UnitOfWork.Commit();
+    } catch (Exception e) {
+      refused = true;
+      UnitOfWork.Discard();
+    }
+  }
+  Assert.True(refused);
+  runas (Ada) { Assert.Null(Me()!.Phone); }
+}

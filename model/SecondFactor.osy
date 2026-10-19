@@ -43,6 +43,12 @@ public class SignInStep {
   /// A link proved the address `Account`, and there is nothing more to do here (an address change, or an account with no
   /// password) — no ticket: the person signs in as usual.
   public bool Proven = false;
+  /// With `Proven`: the link had been used — or another link or code had settled the same thing — and the account
+  /// already uses the address `Account` it went to, proven. Nothing happened now, and nothing more is to be done.
+  public bool AlreadyProven = false;
+  /// A provider sign-in for an account the app's own door has not finished with (`AccountsSetup.OwnDoor`): no ticket,
+  /// and the provider page shows the app's door again, with the same sealed token, for `Account`.
+  public bool OwnDoor = false;
 }
 
 /// What setting up two-step sign-in shows, once: the key to type into an authenticator app, and the QR code that

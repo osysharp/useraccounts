@@ -174,6 +174,7 @@ void unlinking_takes_the_password_and_the_provider_stops_signing_in() {
 
 [Test(ProviderDesk)]
 void the_account_page_lists_the_providers_the_app_offers() {
+  OfferedSignInProviders.Stub(() => new List<string> { "Google", "GitHub" });
   runas (Ada) {
     var facts = MyProviders();
     Assert.Equal(2, facts.Offered.Count);
@@ -181,6 +182,17 @@ void the_account_page_lists_the_providers_the_app_offers() {
     Assert.True(facts.Offered.Contains("GitHub"));
     Assert.Equal(0, facts.Linked.Count);
   }
+}
+
+// A provider declared before it was set up — no client id — is not offered: not on the account page, not on the sign-in
+// page. Measured 2026-10-13 on the beta: a sign-up page sent visitors to GitHub with a placeholder client id. Unstubbed, so
+// this is the platform's own answer; the other half (a configured one IS offered) needs a secret's value, which a test run
+// does not set, and is held in C# (OAuthServiceTests.AProviderThatCannotFinish_IsNeitherOfferedNorStarted).
+[Test(ProviderDesk)]
+void a_provider_declared_without_a_client_id_is_never_offered() {
+  Assert.False(OfferedSignInProviders().Contains("Unfinished"));
+  Assert.False(AccountsPageFacts().Providers.Contains("Unfinished"));
+  runas (Ada) { Assert.False(MyProviders().Offered.Contains("Unfinished")); }
 }
 
 [Test(ProviderDesk)]
@@ -196,4 +208,50 @@ void asking_for_a_new_verification_link_mails_one_and_says_nothing_about_who_has
     Assert.Equal(0, MailsTo("ada@desk.test", "Confirm your address"));
     Assert.Equal(0, MailsTo("nobody@desk.test", "Confirm your address"));
   }
+}
+
+// Every provider button shows its provider's mark, from the ONE mapping the sign-in page and the account page share.
+// Built-in marks for the providers the platform knows; one the app gives a mark of its own (`AccountsSetup.Marks` — this
+// desk's "Acme SSO"); anything else gets the plain sign-in glyph, never a blank square.
+[Test]
+void each_provider_button_shows_its_providers_mark() {
+  Assert.Equal(Icons.Github, ProviderIcon("GitHub"));
+  Assert.Equal(Icons.Google, ProviderIcon("Google"));
+  Assert.Equal(Icons.Microsoft, ProviderIcon("Microsoft"));
+  Assert.Equal(Icons.Building, ProviderIcon("Acme SSO"));
+  Assert.Equal(Icons.Login, ProviderIcon("Okta"));
+}
+
+// …and the marks reach both pages: the sign-in page's facts and the account page's, which are what their buttons draw.
+[Test(ProviderDesk)]
+void both_pages_are_handed_each_offered_providers_mark() {
+  OfferedSignInProviders.Stub(() => new List<string> { "GitHub", "Acme SSO", "Okta" });
+  var signIn = AccountsPageFacts();
+  Assert.Equal(Icons.Github, MarkOf(signIn.Marks, "GitHub"));
+  Assert.Equal(Icons.Building, MarkOf(signIn.Marks, "Acme SSO"));
+  Assert.Equal(Icons.Login, MarkOf(signIn.Marks, "Okta"));
+  runas (Ada) {
+    var account = MyProviders();
+    Assert.Equal(Icons.Building, MarkOf(account.Marks, "Acme SSO"));
+    Assert.Equal(Icons.Github, MarkOf(account.Marks, "GitHub"));
+  }
+}
+
+// ⭐ AN ACCOUNT THE APP'S OWN DOOR HAS NOT FINISHED GOES BACK TO THAT DOOR (`AccountsSetup.OwnDoor`). A provider sign-in for
+//    it answers `OwnDoor` and NO ticket — the door (an application whose phone is not proven yet) is where it finishes —
+//    and the moment the door says it is finished, the same identity signs in as ever.
+[Test(ProviderDesk)]
+void a_provider_sign_in_for_an_account_the_apps_door_has_not_finished_goes_back_to_the_door() {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("nils@desk.test", "Google")); }
+  Assert.NotEqual("", step.Ticket);                                        // made and linked, as any provider sign-up
+  DoorUnfinished.Stub(email => email == "nils@desk.test");
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("nils@desk.test", "Google")); }
+  Assert.True(step.OwnDoor);
+  Assert.Equal("", step.Ticket);
+  Assert.Equal("nils@desk.test", step.Account);
+  DoorUnfinished.Stub(email => false);
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("nils@desk.test", "Google")); }
+  Assert.False(step.OwnDoor);
+  Assert.NotEqual("", step.Ticket);
 }

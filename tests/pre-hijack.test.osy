@@ -214,3 +214,26 @@ void a_first_proof_link_for_an_address_the_account_has_left_is_refused_before_an
   Assert.False(Proven("ada-now@desk.test"));
   Assert.True(Opens("ada-now@desk.test", "correct-horse-1"));
 }
+
+[Test(Strangers)]
+void a_passkey_the_stranger_added_before_the_proof_no_longer_signs_in() {
+  runas (AuthBootstrap) { SignUp("owner@desk.test", "strangers-password-1", "Mallory"); }
+  // Signed in at once, the stranger adds a passkey of their own — a way in that needs no password at all.
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("owner@desk.test", "strangers-password-1"); }
+  runas (AuthBootstrap) {
+    AddPasskey("owner@desk.test", "", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "Mallory's phone");
+  }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("owner@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { VerifyEmail(token, "", "owners-own-password"); }
+  // The owner's account is the owner's alone: the stranger's passkey went with everything else they set up.
+  runas (AuthBootstrap) {
+    Assert.False(PasskeyCredential.Any(p => p.Account.Email == "owner@desk.test"));
+    var start = StartPasskeySignIn();
+    var handle = PasskeyHandle(User.Single(u => u.Email == "owner@desk.test"));
+    Assert.Contains("does not sign in to an account here", Assert.Throws<ValidationException>(
+      () => SignInWithPasskey(start.Token, WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 1, true))).Message);
+  }
+}

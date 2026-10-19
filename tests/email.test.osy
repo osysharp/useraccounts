@@ -24,8 +24,11 @@ void opening_the_link_proves_the_address() {
   runas (AuthBootstrap) { proven = VerifyEmail(token, "correct-horse-1"); }
   Assert.NotEqual("", proven.Ticket);
   runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "ada@desk.test").EmailVerifiedAt); }
-  // Once only.
-  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail(token)); }
+  // Once only: opened again it signs nobody in, and says the address is already the account's.
+  SignInStep again = new SignInStep();
+  runas (AuthBootstrap) { again = VerifyEmail(token, "correct-horse-1"); }
+  Assert.True(again.AlreadyProven);
+  Assert.Equal("", again.Ticket);
 }
 
 [Test(People)]
@@ -121,4 +124,132 @@ void a_signed_in_account_cannot_verify_itself_or_move_its_own_address() {
     Assert.Denied(() => new EmailCheck { Account = User.Single(u => u.Email == "ada@desk.test"), Email = "ada@desk.test",
                                          TokenHash = Crypto.Sha256Hex("known"), ExpiresAt = DateTime.UtcNow.AddDays(1) });
   }
+}
+
+// Two asks to move the address mail two links; the account moves on whichever is opened first, and that spends the
+// other. Opening the other afterwards is not a failure to report — the change it asked for has happened.
+[Test(People)]
+void a_second_link_for_a_change_that_already_happened_says_so() {
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.new@desk.test"); }
+  string first = "";
+  runas (AuthBootstrap) { first = TokenIn("bo.new@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.new@desk.test"); }
+  string second = "";
+  runas (AuthBootstrap) { second = TokenIn("bo.new@desk.test", "/verify-email/"); }
+  Assert.NotEqual(first, second);
+  runas (AuthBootstrap) { VerifyEmail(first); }
+  runas (AuthBootstrap) { Assert.Equal("bo.new@desk.test", User.Single(u => u.DisplayName == "Bo").Email); }
+  SignInStep again = new SignInStep();
+  runas (AuthBootstrap) { again = VerifyEmail(second); }
+  Assert.True(again.AlreadyProven);
+  Assert.Equal("bo.new@desk.test", again.Account);
+  // …and the first one, opened twice, says the same.
+  SignInStep twice = new SignInStep();
+  runas (AuthBootstrap) { twice = VerifyEmail(first); }
+  Assert.True(twice.AlreadyProven);
+}
+
+// A link nobody can use still gets the one sentence, whatever is behind it: unknown, expired, or for an address the
+// account has since left — a token says nothing about an account but the one it was mailed to, at the address it went to.
+[Test(People)]
+void a_link_for_an_address_the_account_has_left_is_still_refused() {
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.new@desk.test"); }
+  string toNew = "";
+  runas (AuthBootstrap) { toNew = TokenIn("bo.new@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { VerifyEmail(toNew); }
+  runas (AuthBootstrap) { ChangeEmail("bo.new@desk.test", "correct-horse-2", "bo.third@desk.test"); }
+  string toThird = "";
+  runas (AuthBootstrap) { toThird = TokenIn("bo.third@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { VerifyEmail(toThird); }
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail(toNew)); }
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail("no-such-token")); }
+}
+
+void SignInAsBo() {
+  Ui.Visit("/login");
+  Ui.Fill("Email", "bo@desk.test");
+  Ui.Fill("Password", "correct-horse-2");
+  Ui.Click("Sign in");
+}
+
+// The account page asks for the change first and the password after — in the same dialog, as its second step — and
+// mails nothing until then. One confirmation mails ONE link, and the row then says where it went and offers to send it
+// again rather than a second change.
+[Test(People)]
+void the_account_page_takes_the_change_then_the_password_and_mails_one_link() {
+  SignInAsBo();
+  Ui.Visit("/account");
+  Assert.Hidden("Current password");
+  Ui.Click("Change address…");
+  Assert.Dialog("Change address");
+  Ui.Fill("New address", "bo.new@desk.test");
+  Assert.Hidden("Current password");
+  Ui.Click("Save");
+  Assert.Visible("Current password");
+  Assert.Visible("To move your account to bo.new@desk.test, confirm it is you.");
+  Ui.Shot("account-confirm-change");
+  runas (AuthBootstrap) { Assert.Equal(0, MailsTo("bo.new@desk.test", "")); }
+  Ui.Fill("Current password", "correct-horse-2");
+  Ui.Click("Confirm");
+  Assert.Visible("Confirmation sent to bo.new@desk.test");
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("bo.new@desk.test", "Confirm your new address")); }
+  Assert.Hidden("Change address…");
+  Assert.Visible("Resend");
+  Ui.Shot("account-address-pending");
+  // It is the account's state, not the page's: opened again, the row still says so.
+  Ui.Visit("/account");
+  Assert.Visible("Confirmation sent to bo.new@desk.test");
+  Assert.Hidden("Change address…");
+  // Resend asks for the password too, and mails the same address one more link.
+  Ui.Click("Resend");
+  Ui.Fill("Current password", "correct-horse-2");
+  Ui.Click("Confirm");
+  runas (AuthBootstrap) { Assert.Equal(2, MailsTo("bo.new@desk.test", "Confirm your new address")); }
+}
+
+// With two-step sign-in on, the code is asked for last, beside the password; a wrong one keeps the change and the
+// password and asks again, and nothing is mailed until a code fits.
+[Test(People)]
+void a_wrong_code_on_the_account_page_keeps_the_change_and_asks_again() {
+  var key = NewSecondFactorSetup("bo@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("bo@desk.test", "correct-horse-2", key, Totp.Code(key)); }
+  SignInAsBo();
+  Ui.Fill("Code", Totp.Code(key, DateTime.UtcNow.AddSeconds(30)));
+  Ui.Click("Continue");
+  Ui.Visit("/account");
+  Ui.Click("Change address…");
+  Ui.Fill("New address", "bo.new@desk.test");
+  Ui.Click("Save");
+  Assert.Visible("Code from your app");
+  Ui.Fill("Current password", "correct-horse-2");
+  Ui.Fill("Code from your app", "000000");
+  Ui.Click("Confirm");
+  Assert.Visible("That code is not right — type the newest code your app shows, or a recovery code.");
+  Assert.Visible("To move your account to bo.new@desk.test, confirm it is you.");
+  Ui.Shot("account-wrong-code");
+  runas (AuthBootstrap) { Assert.Equal(0, MailsTo("bo.new@desk.test", "")); }
+  // Only the code is typed again: the address and the password are still there.
+  Ui.Fill("Code from your app", on.RecoveryCodes[0]);
+  Ui.Click("Confirm");
+  Assert.Visible("Confirmation sent to bo.new@desk.test");
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("bo.new@desk.test", "Confirm your new address")); }
+}
+
+principal Bo => User.Single(u => u.DisplayName == "Bo");
+
+// The account page reads where a change waits from the account's own checks — and only its own, and never their hash.
+[Test(People)]
+void an_account_sees_where_its_own_change_waits_and_nothing_more() {
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.new@desk.test"); }
+  runas (Bo) {
+    Assert.Equal("bo.new@desk.test", MyAddress().Pending);
+    Assert.Null(EmailCheck.Single(c => c.Account == Bo).TokenHash);
+  }
+  runas (Ada) {
+    Assert.Equal("", MyAddress().Pending);
+    Assert.Equal(0, EmailCheck.Count(c => c.Email == "bo.new@desk.test"));
+  }
+  // The sign-in flow still reads the hash — without which the null above proves nothing.
+  runas (AuthBootstrap) { Assert.NotNull(EmailCheck.Single(c => c.Email == "bo.new@desk.test").TokenHash); }
 }

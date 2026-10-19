@@ -138,9 +138,11 @@ void a_signed_in_person_changes_their_password_on_the_account_page() {
   Assert.Visible("ada@desk.test");
   Assert.Visible("Confirmed");
   Ui.Shot("account");
-  Ui.Fill("Current password", "correct-horse-1");
+  Ui.Click("Change password…");
   Ui.Fill("New password", "a-brand-new-one");
-  Ui.Click("Change password");
+  Ui.Click("Save");
+  Ui.Fill("Current password", "correct-horse-1");
+  Ui.Click("Confirm");
   Assert.Visible("Your password is changed.");
   Ui.SignOut();
   SignInAs("ada@desk.test", "a-brand-new-one");
@@ -223,10 +225,11 @@ void the_account_page_sets_up_two_step_sign_in() {
   Ui.Visit("/account");
   Assert.Visible("Two-step sign-in");
   Assert.Visible("Off");
-  Ui.Click("Set up two-step sign-in");
-  Assert.Visible("Type your current password first — setting up two-step sign-in asks for it.");
+  Ui.Click("Set up two-step sign-in…");
+  Ui.Click("Confirm");
+  Assert.Visible("Type your current password.");
   Ui.Fill("Current password", "correct-horse-1");
-  Ui.Click("Set up two-step sign-in");
+  Ui.Click("Confirm");
   Assert.Visible("Or type this key into the app:");
   Ui.Shot("account-two-step-setup");
 }
@@ -242,10 +245,11 @@ void with_two_step_on_the_account_page_hands_out_new_recovery_codes_for_a_code()
   Assert.Visible("Welcome to the desk");
   Ui.Visit("/account");
   Assert.Visible("On");
-  Assert.Visible("Signing in asks for a code from your app. 10 recovery codes left.");
+  Assert.Visible("10 recovery codes left");
+  Ui.Click("New recovery codes…");
   Ui.Fill("Current password", "correct-horse-1");
   Ui.Fill("Code from your app", on.RecoveryCodes[0]);
-  Ui.Click("New recovery codes");
+  Ui.Click("Confirm");
   Assert.Visible("Your recovery codes");
   Ui.Shot("recovery-codes");
 }
@@ -281,6 +285,24 @@ void a_sign_up_that_must_prove_its_address_types_the_code_from_the_mail_and_is_i
   Assert.Visible("Signed in as nils@desk.test");
 }
 
+// The step names the address and says it CONFIRMS it — not a second sign-in step — and once the carrier reports that
+// mail to it bounced, it says that too, so nobody waits for a code that will never come.
+[Test(Door)]
+void the_address_step_says_what_it_confirms_and_when_mail_to_it_did_not_arrive() {
+  AddressProofRequired.Stub(() => true);
+  SignUpAs("Nils", "nils@desk.test", "a-long-password");
+  Assert.Visible("Confirm your email address");
+  Assert.Visible("Check your mail at nils@desk.test.");
+  Assert.Visible("The mail says what comes next — a six-digit code to type here, or a link to open. Either one confirms that the address is yours; this is not a second sign-in step.");
+  Assert.Hidden("The mail did not arrive");
+
+  AddressMailProblems.Stub(a => new List<string> { "Mail to nils@desk.test bounced (Permanent General: no such mailbox)." });
+  Ui.Click("Send a new code");
+  Assert.Visible("The mail did not arrive");
+  Assert.Visible("Mail to nils@desk.test bounced (Permanent General: no such mailbox). No code will arrive there — if the address is wrong, go back and use the right one.");
+  Ui.Shot("address-step-bounced");
+}
+
 [Test(Door)]
 void a_sign_up_that_must_prove_its_address_is_not_in_before_the_code() {
   AddressProofRequired.Stub(() => true);
@@ -305,4 +327,41 @@ void a_proven_number_signs_in_by_text_on_the_sign_in_page() {
   Ui.Click("Sign in");
   Assert.Visible("Welcome to the desk");
   Assert.Visible("Signed in as ada@desk.test");
+}
+
+// The sign-in page draws a "Continue with …" button for each offered provider, each with the mark it was handed — the
+// kit's own for GitHub, the app's own for its company sign-in (`AccountsSetup.Marks`).
+[Test(Door)]
+void the_sign_in_page_offers_each_provider_with_its_mark() {
+  OfferedSignInProviders.Stub(() => new List<string> { "GitHub", "Acme SSO" });
+  Ui.Visit("/login");
+  Assert.Visible("Continue with GitHub");
+  Assert.Visible("Continue with Acme SSO");
+  Ui.Shot("sign-in-providers");
+}
+
+// A passkey made by a device the test plays (WebAuthn.TestCreate) — this browser stand-in has no authenticator of its
+// own, so here the page lists, renames and removes passkeys; the real browser's prompt is the visual suite's.
+[Test(Door)]
+void the_account_page_lists_renames_and_removes_a_passkey() {
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("ada@desk.test", "correct-horse-1"); }
+  runas (AuthBootstrap) {
+    AddPasskey("ada@desk.test", "", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "Phone");
+  }
+  SignInAs("ada@desk.test", "correct-horse-1");
+  Ui.Visit("/account");
+  Assert.Visible("Passkeys");
+  Assert.Visible("Phone");
+  Ui.Click("Rename…");
+  Ui.Fill("Name", "Work phone");
+  Ui.Click("Save");
+  Assert.Visible("The passkey is renamed.");
+  Assert.Visible("Work phone");
+  Ui.Click("Remove…");
+  Ui.Fill("Current password", "correct-horse-1");
+  Ui.Click("Confirm");
+  Assert.Visible("\"Work phone\" no longer signs in to your account.");
+  Assert.Visible("No passkeys yet.");
 }

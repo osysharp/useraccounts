@@ -128,6 +128,22 @@ void sign_up_is_refused_when_the_app_closes_it() {
   runas (AuthBootstrap) { Assert.False(User.Any(u => u.Email == "late@desk.test")); }
 }
 
+// ⭐ AN APP'S OWN DOOR STILL MAKES AN ACCOUNT WHILE SIGN-UP IS CLOSED (`SignUpAtDoor`) — an application form, a beta's front
+//    door — and it is the same sign-up: the app's kind of account, the role the app names, and a password that signs in.
+[Test(Desk)]
+void an_apps_own_door_makes_an_account_while_sign_up_is_closed() {
+  SignupIsOpen.Stub(() => false);
+  runas (AuthBootstrap) { SignUpAtDoor("door@desk.test", "a-long-password", "Dora"); }
+  runas (AuthBootstrap) {
+    var dora = Employee.Single(e => e.Email == "door@desk.test");
+    Assert.Equal("Dora", dora.DisplayName);
+    Assert.True(RoleGrant.Any(g => g.Member == dora && g.Role == AppRole.Member));
+  }
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignIn("door@desk.test", "a-long-password").Ticket; }
+  Assert.NotEqual("", ticket);
+}
+
 [Test(Desk)]
 void sign_up_makes_the_apps_own_kind_of_account() {
   runas (AuthBootstrap) { SignUp("new@desk.test", "a-long-password", "Nils"); }
@@ -139,4 +155,18 @@ void sign_up_makes_the_apps_own_kind_of_account() {
   string ticket = "";
   runas (AuthBootstrap) { ticket = SignIn("new@desk.test", "a-long-password").Ticket; }
   Assert.NotEqual("", ticket);
+}
+
+// A helper that calls an [AuthMethod] is refused — a helper is not the test — and the refusal says what to do in a TEST,
+// not on a page: call it from the test body, or inside `runas (AuthBootstrap)`. (It named the page until 2026-10-14,
+// which sent a test author looking for a page that had nothing to do with it.)
+SignInStep SignInFromAHelper(string email, string password) { return SignIn(email, password); }
+
+[Test(Desk)]
+void an_auth_method_called_from_a_test_helper_is_refused_with_what_to_do_in_a_test() {
+  var e = Assert.Throws<Exception>(() => SignInFromAHelper("ada@desk.test", "correct-horse-1"));
+  Assert.Contains("the TEST calls it", e.Message);
+  Assert.Contains("SignInFromAHelper", e.Message);
+  Assert.Contains("runas (AuthBootstrap)", e.Message);
+  Assert.DoesNotContain("call it from the page itself", e.Message);
 }
