@@ -1114,3 +1114,25 @@ public component ProviderSignIn(string then = "", bool ownDoor = false) {
     }
   }
 }
+
+/// A QR code's rows (`Qr.Encode`) drawn as modules, labelled for an authenticator app. Kept for apps written against
+/// 1.1, which offered it; new code writes Osysharp.Ui's `QrCode(rows, label: …)`, which this now draws.
+[Composable]
+public component AccountsQrCode(List<string> rows, int module = 4) {
+  render { QrCode(rows, module: module, label: "QR code for your authenticator app"); }
+}
+
+/// A row of QR modules as its runs, left to right: a dark run's length positive, a light one's negative. Kept for apps
+/// written against 1.1, which offered it.
+List<int> QrRuns(string row) {
+  List<int> runs = [];
+  var i = 0;
+  while (i < row.Length) {
+    var c = row.Substring(i, 1);
+    var j = i;
+    while (j < row.Length && row.Substring(j, 1) == c) { j = j + 1; }
+    runs.Add(c == "1" ? j - i : i - j);
+    i = j;
+  }
+  return runs;
+}
