@@ -5,6 +5,10 @@
 
 translations sv {
   // ── AccountAddressChangeMail ──
+  /// AccountAddressChangeMail · a button's label · at most ~48 characters
+  /// shown through EmailButton.label
+  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "Then choose a new password: whoever asked knows it. The link works once."
+  button "This wasn't me — cancel the change" => "Det var inte jag, avbryt ändringen";
   /// AccountAddressChangeMail · the preview line an inbox shows beside an email's subject
   /// placeholders: {newAddress} = newAddress (string)
   /// shown through EmailLayout.preview
@@ -13,17 +17,21 @@ translations sv {
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
   mailSubject "Your {AccountsAppName} address is changing" => "Din adress hos {AccountsAppName} ändras";
   /// AccountAddressChangeMail · text on the page
-  /// shown through EmailNote.text
-  /// beside: "Your address is changing"
-  text "If this was not you, change your password now: whoever asked knows it." => "Om det inte var du, byt lösenord nu: den som bad om det känner till det.";
+  /// shown through EmailText.text
+  /// beside: "Your address is changing", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
+  text "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out." => "Om det inte var du, avbryt den: flytten stoppas och alla webbläsare som är inloggade på ditt konto loggas ut.";
   /// AccountAddressChangeMail · text on the page
   /// placeholders: {account.Email} = account.Email (string), {newAddress} = newAddress (string)
   /// shown through EmailText.text
-  /// beside: "Your address is changing", "If this was not you, change your password now: whoever asked knows it."
+  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
   text "Somebody signed in as {account.Email} asked to move the account to {newAddress}. It moves once that address confirms it." => "Någon som är inloggad som {account.Email} har bett om att flytta kontot till {newAddress}. Det flyttas när den adressen har bekräftat det.";
   /// AccountAddressChangeMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
+  text "Then choose a new password: whoever asked knows it. The link works once." => "Välj sedan ett nytt lösenord: den som bad om ändringen känner till det. Länken fungerar en gång.";
+  /// AccountAddressChangeMail · text on the page
   /// shown through EmailHeading.text
-  /// beside: "If this was not you, change your password now: whoever asked knows it."
+  /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
   text "Your address is changing" => "Din adress ändras";
 
   // ── AccountAddressChangedMail ──
@@ -367,10 +375,6 @@ translations sv {
   /// AccountSettings · a button's label · at most ~10 characters
   /// shown through Button.label
   button "Back" => "Tillbaka";
-  /// AccountSettings · a button's label · at most ~12 characters
-  /// shown through Button.label
-  /// beside: "Save"
-  button "Cancel" => "Avbryt";
   /// AccountSettings · a button's label · at most ~21 characters
   /// shown through Button.label
   button "Change address…" => "Ändra adress…";
@@ -410,6 +414,7 @@ translations sv {
   button "Rename…" => "Byt namn…";
   /// AccountSettings · a button's label · at most ~12 characters
   /// shown through Button.label
+  /// beside: "Cancel"
   button "Resend" => "Skicka igen";
   /// AccountSettings · a button's label · at most ~21 characters
   /// shown through Button.label
@@ -516,6 +521,10 @@ translations sv {
   /// placeholders: {address.Email} = address.Email (string)
   /// shown through note
   note "A new link to confirm {address.Email} is on its way." => "En ny länk för att bekräfta {address.Email} är på väg.";
+  /// AccountSettings · note
+  /// placeholders: {was} = was (string)
+  /// shown through note
+  note "The move to {was} is cancelled." => "Flytten till {was} är avbruten.";
   /// AccountSettings · placeholder text inside an empty field · at most ~34 characters
   /// shown through Field.placeholder
   placeholder "MacBook, iPhone, YubiKey" => "MacBook, iPhone, YubiKey";
@@ -759,6 +768,44 @@ translations sv {
   /// shown through ValidationException
   error "That passkey sign-in has expired — start again." => "Inloggningen med nyckel har gått ut. Börja om.";
 
+  // ── CancelAddressChange ──
+  /// CancelAddressChange · an error message
+  /// shown through ValidationException
+  error "That change lapsed without moving anything. If you did not ask for it, choose a new password now: whoever asked knows it." => "Ändringen gick ut utan att något flyttades. Om du inte bad om den, välj ett nytt lösenord nu: den som bad om den känner till det.";
+  /// CancelAddressChange · an error message
+  /// shown through ValidationException
+  error "That link is not one we sent, or it is no longer good." => "Den länken kommer inte från oss, eller så gäller den inte längre.";
+  /// CancelAddressChange · an error message
+  /// placeholders: {check.Email} = check.Email (string), {check.Email2} = check.Email (string), {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through ValidationException
+  error "The account already moved to {check.Email}, so this link cannot undo it. Choose a new password from the sign-in page — the link comes to {check.Email2} now — and tell {AccountsAppName} at once." => "Kontot har redan flyttats till {check.Email}, så den här länken kan inte ångra det. Välj ett nytt lösenord från inloggningssidan (länken skickas nu till {check.Email2}) och kontakta {AccountsAppName} genast.";
+
+  // ── CancelAddressChangePage (/cancel-address-change/{token}) ──
+  /// CancelAddressChangePage · /cancel-address-change/{token} · a title
+  /// shown through [Title]
+  title "Cancel the address change" => "Avbryt adressändringen";
+
+  // ── CancelAddressChangeResult ──
+  /// CancelAddressChangeResult · a link · at most ~30 characters
+  /// shown through TextLink.label
+  /// beside: "Every browser signed in to your account was signed out. Whoever asked knows your password, so choose a new one now."
+  link "Choose a new password" => "Välj ett nytt lösenord";
+  /// CancelAddressChangeResult · message
+  /// placeholders: {kept} = kept (string)
+  /// shown through Alert.message
+  /// beside: "Every browser signed in to your account was signed out. Whoever asked knows your password, so choose a new one now.", "Choose a new password"
+  message "The change is cancelled: your account does not move to {kept}." => "Ändringen är avbruten: ditt konto flyttas inte till {kept}.";
+  /// CancelAddressChangeResult · text on the page
+  text "Cancelling…" => "Avbryter…";
+  /// CancelAddressChangeResult · text on the page
+  /// beside: "Choose a new password"
+  text "Every browser signed in to your account was signed out. Whoever asked knows your password, so choose a new one now." => "Alla webbläsare som var inloggade på ditt konto har loggats ut. Den som bad om ändringen känner till ditt lösenord, så välj ett nytt nu.";
+
+  // ── CancelAddressChangeScreen ──
+  /// CancelAddressChangeScreen · a heading
+  /// shown through AccountsFrame.heading
+  heading "Cancel the address change" => "Avbryt adressändringen";
+
   // ── ChangeAddressFor ──
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
@@ -909,6 +956,12 @@ translations sv {
   /// beside: "Your password", "Confirm and sign in", "I did not make this account, or forgot its password"
   text "{address} receives mail, and the account for it was made before that was confirmed. If you made it, type the password you chose." => "{address} tar emot e-post, och kontot för den skapades innan det bekräftades. Om du skapade det, skriv det lösenord du valde.";
 
+  // ── ConfirmStep ──
+  /// ConfirmStep · a button's label · at most ~12 characters
+  /// shown through Button.label
+  /// also in AccountSettings
+  button "Cancel" => "Avbryt";
+
   // ── EnableSecondFactor ──
   /// EnableSecondFactor · an error message
   /// shown through ValidationException
@@ -989,9 +1042,6 @@ translations sv {
   error "Turn two-step sign-in on first." => "Slå på tvåstegsinloggning först.";
 
   // ── NumberThisAccountMayProve ──
-  /// NumberThisAccountMayProve · an error message
-  /// shown through ValidationException
-  error "Another account already uses that number." => "Ett annat konto använder redan det numret.";
   /// NumberThisAccountMayProve · an error message
   /// shown through ValidationException
   error "Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67." => "Skriv numret med + och landsnummer: +46 70 123 45 67, inte 070 123 45 67.";
@@ -1162,6 +1212,7 @@ translations sv {
   error "Give it a name." => "Ge den ett namn.";
   /// RenamePasskey · an error message
   /// shown through ValidationException
+  /// also in CancelMyAddressChange
   /// also in StartStepUp
   error "Sign in first." => "Logga in först.";
 
@@ -1200,6 +1251,7 @@ translations sv {
   /// shown through TextLink.label
   /// beside: "Your password is changed. Sign in with it now — two-step sign-in comes next."
   /// also in VerifyEmailResult
+  /// also in CancelAddressChangeResult
   link "Sign in" => "Logga in";
   /// ResetPasswordForm · message
   /// shown through Alert.message
@@ -1240,6 +1292,7 @@ translations sv {
   label "Code from the app" => "Kod från appen";
   /// SecondFactorEnrolment · a label (a field, a list item, a menu entry) · at most ~48 characters
   /// shown through QrCode.label
+  /// also in AccountsQrCode
   label "QR code for your authenticator app" => "QR-kod för din autentiseringsapp";
   /// SecondFactorEnrolment · message
   /// shown through Alert.message

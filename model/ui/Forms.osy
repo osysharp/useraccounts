@@ -488,6 +488,35 @@ public component VerifyEmailResult(string token) {
   }
 }
 
+/// What the old address's "This wasn't me — cancel the change" link opens (`CancelAddressChange`): the move is called
+/// off as the page opens, and it says so — and that every browser signed in to the account was signed out.
+[Composable]
+public component CancelAddressChangeResult(string token) {
+  string kept = "";
+  string problem = "";
+  bool done = false;
+
+  on mount {
+    try { kept = CancelAddressChange(token); }
+    catch (Exception ex) { problem = ex.Message; }
+    done = true;
+  }
+
+  render {
+    Stack(gap: 3) {
+      if (!done) { Text("Cancelling…", color: Colors.TextMuted); }
+      else if (problem == "") {
+        Alert($"The change is cancelled: your account does not move to {kept}.", tone: Tone.Success);
+        Text("Every browser signed in to your account was signed out. Whoever asked knows your password, so choose a new one now.");
+        TextLink("Choose a new password", to: "/forgot-password");
+      } else {
+        Alert(problem, tone: Tone.Danger);
+        TextLink("Sign in", to: "/login");
+      }
+    }
+  }
+}
+
 /// The first proof of an address on an account that already has a password (`SignInStep.MustConfirmPassword`): whoever
 /// made the account types the password they chose; whoever did not — or has forgotten it — chooses a new one, and the
 /// account becomes theirs with every other way into it closed (SECURITY-INVARIANT accounts-first-proof-claims-the-account).
@@ -605,6 +634,14 @@ public component AccountSettings() {
   action OpenPasskey(string which, PasskeyFacts k) { passkeyId = k.CredentialId; passkeyName = k.Name; Open(which); }
 
   action Resend() { newEmail = address.Pending; Open("address"); step = "confirm"; }
+
+  // A mistyped address is called off here, rather than waited out: the link already mailed to it then moves nothing.
+  action CancelPending() {
+    note = ""; problem = "";
+    var was = address.Pending;
+    try { CancelMyAddressChange(); address = MyAddress(); note = $"The move to {was} is cancelled."; }
+    catch (Exception ex) { problem = ex.Message; }
+  }
 
   action Close() {
     change = ""; step = ""; provider = ""; current = ""; code = ""; textedCode = ""; problem = ""; codes = [];
@@ -767,7 +804,7 @@ public component AccountSettings() {
             if (address.Pending != "") {
               Text($"Confirmation sent to {address.Pending}", color: Colors.TextMuted);
               Text("Your account moves to it when the link in that mail is opened.", fontSize: FontSize.Caption, color: Colors.TextMuted);
-              Row(gap: 2) { Button("Resend", onPress: Resend); }
+              Row(gap: 2) { Button("Resend", onPress: Resend); Button("Cancel", onPress: CancelPending, tone: Tone.Ghost); }
             } else {
               Row(gap: 2, wrap: Wrapping.Wrap) {
                 Button("Change address…", onPress: () => Open("address"));

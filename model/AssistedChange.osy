@@ -79,6 +79,24 @@ void MoveAccountForTheDesk(AddressChangeRequest change) {
   account.Email = change.NewAddress;
 }
 
+/// The desk's recorded change spends every change of address the person had started themselves and not yet confirmed —
+/// one of the two ways a pending change is spent from outside the sign-in flow (`EmailCheck`'s `deny update UsedAt,
+/// CancelledAt … except via …`). Called by the change's own run and by nothing else.
+///
+/// SECURITY-INVARIANT(accounts-a-desk-move-spends-the-persons-pending-change): after the desk moves an account, no
+/// confirmation link the person was mailed for a change of their own can move it again. The spend is written here, in a
+/// function the `except via` floor names, because the run is neither the authenticator nor the account itself — leave
+/// this function off that list and the run faults on the floor, and the OLD link stays live. Guarded by
+/// tests/assisted-change.test.osy (a_change_the_person_had_started_elsewhere_is_spent_by_the_desks).
+[Server, Authorize(ChangesAccountsFor)]
+[SuppressWarning("cost-unbounded-read")]   // one account's outstanding address links
+void SpendPendingChangesForTheDesk(User account) {
+  var now = DateTime.UtcNow;
+  foreach (var pending in EmailCheck.Where(c => c.Account == account && c.IsChange && c.UsedAt == null).ToList()) {
+    pending.UsedAt = now;
+  }
+}
+
 /// Moves the account and tells both addresses — as the system, in the commit that made the change.
 public workflow AssistedAddressChange {
   Tracks    = AddressChangeRequest.State;
@@ -95,9 +113,7 @@ public workflow AssistedAddressChange {
       account.EmailVerifiedAt = DateTime.UtcNow;
       // A change the person had asked for themselves, to some other address, would move it again when its link is
       // opened: the desk's change spends it.
-      foreach (var pending in EmailCheck.Where(c => c.Account == account && c.IsChange && c.UsedAt == null).ToList()) {
-        pending.UsedAt = DateTime.UtcNow;
-      }
+      SpendPendingChangesForTheDesk(account);
       var mails = App.Setting<AccountsSetup>().Mails;
       SendRendered(old, mails.AddressChangedFor(account, old, this.Item.NewAddress));
       SendRendered(this.Item.NewAddress, mails.AddressMovedHere(account, old));

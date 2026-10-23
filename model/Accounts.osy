@@ -21,9 +21,10 @@ public entity User : Principal {
   /// When two-step sign-in was turned on — null while it is off. The account's owner reads it (the account page).
   DateTime? SecondFactorOnAt;
   /// The account's phone number, E.164 — set by the sign-in flow alone, once a texted code proved it (`ProvePhone`).
-  /// `[Unique]` because a number is one account's (SECURITY-INVARIANT accounts-one-account-per-proven-number): the check
-  /// before a code is texted gives the sentence, and the database refuses the second of two proofs that raced past it.
-  [Unique, MaxLength(20)] string? Phone;
+  /// NOT unique: one person may keep several accounts behind one phone, and each proves the number
+  /// with a code of its own. A number SHARED that way identifies none of them, so it signs nobody in by itself
+  /// (SECURITY-INVARIANT accounts-a-shared-number-signs-in-no-one-by-itself, Phone.osy).
+  [MaxLength(20)] string? Phone;
   /// When the number was proven — null for none.
   DateTime? PhoneVerifiedAt;
   /// The account chose a texted code as its second step (`SetSmsSecondStep`) — never the factor an app can require.
@@ -104,11 +105,25 @@ public entity EmailCheck {
   [Required, Unique, MaxLength(64)] string TokenHash;
   [Required] DateTime ExpiresAt;
   DateTime? UsedAt;
+  /// For a change: the hash of the token in the "This wasn't me — cancel the change" link the OLD address was mailed
+  /// (`CancelAddressChange`). Null for a proof of the account's own address.
+  [Unique, MaxLength(64)] string? CancelTokenHash;
+  /// When the change was called off — by the old address's link, or from the account page — rather than confirmed.
+  DateTime? CancelledAt;
   security {
     allow read, create, update when IsAuthenticator;
-    // The account sees its own — which address a confirmation is on its way to (`MyAddress`) — and never the hash.
+    // The account sees its own — which address a confirmation is on its way to (`MyAddress`) — and never the hashes.
     allow read when IsAuthenticated where Account == user;
-    deny read TokenHash when !IsAuthenticator;
+    deny read TokenHash, CancelTokenHash when !IsAuthenticator;
+    // …and calls off its own pending move from the account page — through `CancelMyAddressChange`, which spends it, and
+    // nothing else: what a confirmation proves and where it moves the account are the sign-in flow's alone.
+    allow update when IsAuthenticated where Account == user;
+    deny update Account, Email, IsChange, TokenHash, ExpiresAt, CancelTokenHash when !IsAuthenticator;
+    // The desk's move spends them too (`SpendPendingChangesForTheDesk`, from `AssistedAddressChange`'s run) — that run is
+    // neither the authenticator nor the account, so without it here the person's OLD link would stay live.
+    // SECURITY-INVARIANT(accounts-a-desk-move-spends-the-persons-pending-change).
+    deny update UsedAt when !IsAuthenticator except via CancelMyAddressChange, SpendPendingChangesForTheDesk;
+    deny update CancelledAt when !IsAuthenticator except via CancelMyAddressChange;
   }
 }
 

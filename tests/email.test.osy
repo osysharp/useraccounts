@@ -253,3 +253,66 @@ void an_account_sees_where_its_own_change_waits_and_nothing_more() {
   // The sign-in flow still reads the hash — without which the null above proves nothing.
   runas (AuthBootstrap) { Assert.NotNull(EmailCheck.Single(c => c.Email == "bo.new@desk.test").TokenHash); }
 }
+
+// "This wasn't me — cancel the change": the OLD address is told of a move, and its mail carries a link that calls the
+// move off with no password (whoever asked has it). After it, the link and the code the NEW address was sent move
+// nothing, and every browser signed in to the account is signed out. Opened again, it says the same and does no more.
+// SECURITY-INVARIANT(accounts-the-old-address-can-call-a-move-off).
+[Test(People)]
+void the_old_address_calls_the_move_off_and_the_new_one_can_no_longer_confirm() {
+  string laptop = "";
+  runas (AuthBootstrap) { laptop = SignIn("bo@desk.test", "correct-horse-2").Ticket; }
+  Assert.Equal(200, Api.Get("/account", bearer: laptop).StatusCode);
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.thief@desk.test"); }
+  string cancel = "";
+  string confirm = "";
+  string code = "";
+  runas (AuthBootstrap) {
+    cancel = TokenIn("bo@desk.test", "/cancel-address-change/");
+    confirm = TokenIn("bo.thief@desk.test", "/verify-email/");
+    code = CodeIn("bo.thief@desk.test");
+  }
+  Assert.NotEqual("", cancel);
+  // Opened from the mail, signed out: the page calls the move off and says what that did.
+  Ui.Visit($"/cancel-address-change/{cancel}");
+  Assert.Visible("The change is cancelled: your account does not move to bo.thief@desk.test.");
+  Assert.Visible("Every browser signed in to your account was signed out. Whoever asked knows your password, so choose a new one now.");
+  // The moved-to address can no longer confirm — by its link or by its code — and the account stays where it was.
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail(confirm)); }
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmailCode("bo.thief@desk.test", code)); }
+  runas (AuthBootstrap) {
+    Assert.Equal("bo@desk.test", User.Single(u => u.DisplayName == "Bo").Email);
+    Assert.False(User.Any(u => u.Email == "bo.thief@desk.test"));
+  }
+  // …and whoever asked is signed out.
+  Assert.Equal(401, Api.Get("/account", bearer: laptop).StatusCode);
+  // Single-use: opened again it answers the same and changes nothing more.
+  runas (AuthBootstrap) { Assert.Equal("bo.thief@desk.test", CancelAddressChange(cancel)); }
+  runas (AuthBootstrap) { Assert.Throws(() => CancelAddressChange("no-such-token")); }
+}
+
+// A mistyped address is called off from the account page — its own act, no password — rather than waited out for three
+// days; the link mailed to it then moves nothing. Nothing else about the check is the account's to write.
+[Test(People)]
+void the_account_page_cancels_a_pending_move() {
+  SignInAsBo();
+  Ui.Visit("/account");
+  Ui.Click("Change address…");
+  Ui.Fill("New address", "bo.typo@desk.test");
+  Ui.Click("Save");
+  Ui.Fill("Current password", "correct-horse-2");
+  Ui.Click("Confirm");
+  Assert.Visible("Confirmation sent to bo.typo@desk.test");
+  Ui.Click("Cancel");
+  Assert.Visible("The move to bo.typo@desk.test is cancelled.");
+  Assert.Hidden("Confirmation sent to bo.typo@desk.test");
+  Assert.Visible("Change address…");
+  string confirm = "";
+  runas (AuthBootstrap) { confirm = TokenIn("bo.typo@desk.test", "/verify-email/"); }
+  runas (AuthBootstrap) { Assert.Throws(() => VerifyEmail(confirm)); }
+  runas (AuthBootstrap) { Assert.Equal("bo@desk.test", User.Single(u => u.DisplayName == "Bo").Email); }
+  // The account may spend its own pending move, and nothing more: pointing a check at another address is refused.
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.second@desk.test"); }
+  runas (Bo) { Assert.Denied(() => PointCheckAt("bo.second@desk.test", "mallory@desk.test")); }
+  runas (Bo) { Assert.Denied(() => SpendCheck("bo.second@desk.test")); }
+}

@@ -74,6 +74,11 @@ public class AccountTexts {
   public virtual string UsePasswordToSignIn(User account) {
     return $"Sign in to {AccountsAppName()} with your password — this phone is your second step, so a code alone does not sign you in.";
   }
+  /// To a number that asked for a sign-in code when more than one account may sign in with it — a code would not say which
+  /// account to sign in to, so none is sent.
+  public virtual string UsePasswordOnASharedNumber() {
+    return $"Sign in to {AccountsAppName()} with your email and password — this number is on more than one account, so a code cannot say which.";
+  }
 }
 
 /// How long a one-time code works.

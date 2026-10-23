@@ -5,6 +5,10 @@
 
 translations ar {
   // ── AccountAddressChangeMail ──
+  /// AccountAddressChangeMail · a button's label · at most ~48 characters
+  /// shown through EmailButton.label
+  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "Then choose a new password: whoever asked knows it. The link works once."
+  button "This wasn't me — cancel the change" => "لم أكن أنا، ألغِ التغيير";
   /// AccountAddressChangeMail · the preview line an inbox shows beside an email's subject
   /// placeholders: {newAddress} = newAddress (string)
   /// shown through EmailLayout.preview
@@ -13,17 +17,21 @@ translations ar {
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
   mailSubject "Your {AccountsAppName} address is changing" => "عنوانك في {AccountsAppName} يتغير";
   /// AccountAddressChangeMail · text on the page
-  /// shown through EmailNote.text
-  /// beside: "Your address is changing"
-  text "If this was not you, change your password now: whoever asked knows it." => "إن لم تكن أنت، فغيّر كلمة المرور الآن: من طلب ذلك يعرفها.";
+  /// shown through EmailText.text
+  /// beside: "Your address is changing", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
+  text "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out." => "إذا لم تكن أنت، فألغِه: يتوقف النقل، ويُسجَّل خروج كل متصفح مسجَّل الدخول إلى حسابك.";
   /// AccountAddressChangeMail · text on the page
   /// placeholders: {account.Email} = account.Email (string), {newAddress} = newAddress (string)
   /// shown through EmailText.text
-  /// beside: "Your address is changing", "If this was not you, change your password now: whoever asked knows it."
+  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
   text "Somebody signed in as {account.Email} asked to move the account to {newAddress}. It moves once that address confirms it." => "طلب شخص مسجّل الدخول باسم {account.Email} نقل الحساب إلى {newAddress}. سينتقل الحساب بمجرد تأكيد ذلك العنوان.";
   /// AccountAddressChangeMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
+  text "Then choose a new password: whoever asked knows it. The link works once." => "ثم اختر كلمة مرور جديدة: من طلب التغيير يعرفها. يعمل الرابط مرة واحدة.";
+  /// AccountAddressChangeMail · text on the page
   /// shown through EmailHeading.text
-  /// beside: "If this was not you, change your password now: whoever asked knows it."
+  /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
   text "Your address is changing" => "عنوانك يتغير";
 
   // ── AccountAddressChangedMail ──
@@ -367,10 +375,6 @@ translations ar {
   /// AccountSettings · a button's label · at most ~10 characters
   /// shown through Button.label
   button "Back" => "رجوع";
-  /// AccountSettings · a button's label · at most ~12 characters
-  /// shown through Button.label
-  /// beside: "Save"
-  button "Cancel" => "إلغاء";
   /// AccountSettings · a button's label · at most ~21 characters
   /// shown through Button.label
   button "Change address…" => "تغيير العنوان…";
@@ -410,6 +414,7 @@ translations ar {
   button "Rename…" => "إعادة تسمية…";
   /// AccountSettings · a button's label · at most ~12 characters
   /// shown through Button.label
+  /// beside: "Cancel"
   button "Resend" => "إعادة الإرسال";
   /// AccountSettings · a button's label · at most ~21 characters
   /// shown through Button.label
@@ -516,6 +521,10 @@ translations ar {
   /// placeholders: {address.Email} = address.Email (string)
   /// shown through note
   note "A new link to confirm {address.Email} is on its way." => "رابط جديد لتأكيد {address.Email} في طريقه إليك.";
+  /// AccountSettings · note
+  /// placeholders: {was} = was (string)
+  /// shown through note
+  note "The move to {was} is cancelled." => "أُلغي النقل إلى {was}.";
   /// AccountSettings · placeholder text inside an empty field · at most ~34 characters
   /// shown through Field.placeholder
   placeholder "MacBook, iPhone, YubiKey" => "MacBook، iPhone، YubiKey";
@@ -759,6 +768,44 @@ translations ar {
   /// shown through ValidationException
   error "That passkey sign-in has expired — start again." => "انتهت صلاحية تسجيل الدخول بمفتاح المرور هذا. ابدأ من جديد.";
 
+  // ── CancelAddressChange ──
+  /// CancelAddressChange · an error message
+  /// shown through ValidationException
+  error "That change lapsed without moving anything. If you did not ask for it, choose a new password now: whoever asked knows it." => "انتهت صلاحية هذا التغيير دون نقل أي شيء. إذا لم تطلبه، فاختر كلمة مرور جديدة الآن: من طلبه يعرفها.";
+  /// CancelAddressChange · an error message
+  /// shown through ValidationException
+  error "That link is not one we sent, or it is no longer good." => "هذا الرابط ليس مما أرسلناه، أو لم يعد صالحًا.";
+  /// CancelAddressChange · an error message
+  /// placeholders: {check.Email} = check.Email (string), {check.Email2} = check.Email (string), {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through ValidationException
+  error "The account already moved to {check.Email}, so this link cannot undo it. Choose a new password from the sign-in page — the link comes to {check.Email2} now — and tell {AccountsAppName} at once." => "انتقل الحساب بالفعل إلى {check.Email}، لذا لا يمكن لهذا الرابط التراجع عن ذلك. اختر كلمة مرور جديدة من صفحة تسجيل الدخول (يصل الرابط الآن إلى {check.Email2}) وأبلغ {AccountsAppName} فورًا.";
+
+  // ── CancelAddressChangePage (/cancel-address-change/{token}) ──
+  /// CancelAddressChangePage · /cancel-address-change/{token} · a title
+  /// shown through [Title]
+  title "Cancel the address change" => "إلغاء تغيير العنوان";
+
+  // ── CancelAddressChangeResult ──
+  /// CancelAddressChangeResult · a link · at most ~30 characters
+  /// shown through TextLink.label
+  /// beside: "Every browser signed in to your account was signed out. Whoever asked knows your password, so choose a new one now."
+  link "Choose a new password" => "اختر كلمة مرور جديدة";
+  /// CancelAddressChangeResult · message
+  /// placeholders: {kept} = kept (string)
+  /// shown through Alert.message
+  /// beside: "Every browser signed in to your account was signed out. Whoever asked knows your password, so choose a new one now.", "Choose a new password"
+  message "The change is cancelled: your account does not move to {kept}." => "أُلغي التغيير: لن ينتقل حسابك إلى {kept}.";
+  /// CancelAddressChangeResult · text on the page
+  text "Cancelling…" => "جارٍ الإلغاء…";
+  /// CancelAddressChangeResult · text on the page
+  /// beside: "Choose a new password"
+  text "Every browser signed in to your account was signed out. Whoever asked knows your password, so choose a new one now." => "سُجِّل خروج كل متصفح كان مسجَّل الدخول إلى حسابك. من طلب التغيير يعرف كلمة مرورك، لذا اختر كلمة مرور جديدة الآن.";
+
+  // ── CancelAddressChangeScreen ──
+  /// CancelAddressChangeScreen · a heading
+  /// shown through AccountsFrame.heading
+  heading "Cancel the address change" => "إلغاء تغيير العنوان";
+
   // ── ChangeAddressFor ──
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
@@ -909,6 +956,12 @@ translations ar {
   /// beside: "Your password", "Confirm and sign in", "I did not make this account, or forgot its password"
   text "{address} receives mail, and the account for it was made before that was confirmed. If you made it, type the password you chose." => "يستقبل {address} البريد، وقد أُنشئ الحساب الخاص به قبل تأكيد ذلك. إن كنت أنت من أنشأه، فاكتب كلمة المرور التي اخترتها.";
 
+  // ── ConfirmStep ──
+  /// ConfirmStep · a button's label · at most ~12 characters
+  /// shown through Button.label
+  /// also in AccountSettings
+  button "Cancel" => "إلغاء";
+
   // ── EnableSecondFactor ──
   /// EnableSecondFactor · an error message
   /// shown through ValidationException
@@ -989,9 +1042,6 @@ translations ar {
   error "Turn two-step sign-in on first." => "فعّل تسجيل الدخول بخطوتين أولًا.";
 
   // ── NumberThisAccountMayProve ──
-  /// NumberThisAccountMayProve · an error message
-  /// shown through ValidationException
-  error "Another account already uses that number." => "هذا الرقم مستخدم بالفعل في حساب آخر.";
   /// NumberThisAccountMayProve · an error message
   /// shown through ValidationException
   error "Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67." => "اكتب الرقم مع علامة + ورمز البلد، مثل +46 70 123 45 67، وليس 070 123 45 67.";
@@ -1162,6 +1212,7 @@ translations ar {
   error "Give it a name." => "أعطه اسمًا.";
   /// RenamePasskey · an error message
   /// shown through ValidationException
+  /// also in CancelMyAddressChange
   /// also in StartStepUp
   error "Sign in first." => "سجّل الدخول أولًا.";
 
@@ -1200,6 +1251,7 @@ translations ar {
   /// shown through TextLink.label
   /// beside: "Your password is changed. Sign in with it now — two-step sign-in comes next."
   /// also in VerifyEmailResult
+  /// also in CancelAddressChangeResult
   link "Sign in" => "تسجيل الدخول";
   /// ResetPasswordForm · message
   /// shown through Alert.message
@@ -1240,6 +1292,7 @@ translations ar {
   label "Code from the app" => "الرمز من التطبيق";
   /// SecondFactorEnrolment · a label (a field, a list item, a menu entry) · at most ~48 characters
   /// shown through QrCode.label
+  /// also in AccountsQrCode
   label "QR code for your authenticator app" => "رمز QR لتطبيق المصادقة";
   /// SecondFactorEnrolment · message
   /// shown through Alert.message

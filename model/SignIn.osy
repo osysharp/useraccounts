@@ -45,6 +45,7 @@ app.AuthBootstrap = new AuthBootstrap {
   PasskeyAdd                = AddPasskey,
   PasskeyRemove             = RemovePasskey,
   PasswordRemove            = RemovePassword,
+  EmailChangeCancel         = CancelAddressChange,
 };
 
 // The fields that hold the login and the credential — what `osy user add` and the console sign-in read. The platform
@@ -323,9 +324,66 @@ public string ChangeEmail(string email, string currentPassword, string newEmail,
     return "";
   }
   if (Principal.Any(p => p.Email == address)) { throw new ValidationException("Another account already uses that address."); }
-  SendCheck(account, address, true);
-  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.AddressChangeRequested(account, address));
+  var check = IssueEmailCheck(account, address, true);
+  // The OLD address gets a link of its own that calls the move off: whoever asked knows the password (and, with two-step
+  // sign-in on, had a code), so "change your password" alone is no answer to "this was not me".
+  var cancelToken = Security.RandomId(32);
+  check.CancelTokenHash = TokenHash(cancelToken);
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.AddressChangeRequested(account, address,
+               AccountsLink($"/cancel-address-change/{cancelToken}")));
   return "";
+}
+
+/// "This wasn't me — cancel the change": open the link the OLD address was mailed when a move was asked for. No password
+/// — whoever asked has it. Every pending move of the account is called off (so the new address's link and code confirm
+/// nothing), and every browser signed in to the account is signed out. Answers the address the account did NOT move to;
+/// opened again, it answers the same and does nothing more. Throws the sentence to show when there is nothing to call
+/// off: the link is unknown, the move lapsed, or it already happened.
+///
+/// SECURITY-INVARIANT(accounts-the-old-address-can-call-a-move-off): until the new address confirms, the old one can
+/// stop the move, and stopping it ends every session the asker holds. Guarded by tests/email.test.osy
+/// (the_old_address_calls_the_move_off_and_the_new_one_can_no_longer_confirm).
+[AuthMethod]
+[SuppressWarning("cost-unbounded-read")]   // one account's outstanding address links and codes
+public string CancelAddressChange(string token) {
+  var check = EmailCheck.FirstOrDefault(c => c.CancelTokenHash == TokenHash(token));
+  var now = DateTime.UtcNow;
+  if (check == null || !check.IsChange || !check.Account.IsActive) {
+    throw new ValidationException("That link is not one we sent, or it is no longer good.");
+  }
+  if (check.CancelledAt != null) { return check.Email; }
+  var account = check.Account;
+  if (check.UsedAt != null && account.Email == check.Email) {
+    throw new ValidationException($"The account already moved to {check.Email}, so this link cannot undo it. Choose a new password from the sign-in page — the link comes to {check.Email} now — and tell {AccountsAppName()} at once.");
+  }
+  if (check.UsedAt != null || check.ExpiresAt < now) {
+    throw new ValidationException("That change lapsed without moving anything. If you did not ask for it, choose a new password now: whoever asked knows it.");
+  }
+  foreach (var pending in EmailCheck.Where(c => c.Account == account && c.IsChange && c.UsedAt == null).ToList()) {
+    pending.UsedAt = now;
+    pending.CancelledAt = now;
+  }
+  foreach (var code in OneTimeCode.Where(c => c.Account == account && c.Purpose == CodePurpose.ProveAddress && c.UsedAt == null
+                                              && c.Destination != account.Email).ToList()) {
+    code.UsedAt = now;
+  }
+  // SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change): the person who asked is signed in somewhere —
+  // opened from a mail, this has no session of its own, so every one of the account's ends when this commits.
+  Security.EndOtherSessions(account.Id);
+  return check.Email;
+}
+
+/// Call off the signed-in account's own pending move — the account page's "Cancel" beside an address it mistyped. Its
+/// own act, so nobody is signed out; the confirmation already mailed to the new address no longer moves anything.
+[Server, Authorize(IsAuthenticated)]
+public void CancelMyAddressChange() {
+  var me = Me();
+  if (me == null) { throw new ValidationException("Sign in first."); }
+  var now = DateTime.UtcNow;
+  foreach (var pending in EmailCheck.Where(c => c.Account == me && c.IsChange && c.UsedAt == null).ToList()) {
+    pending.UsedAt = now;
+    pending.CancelledAt = now;
+  }
 }
 
 /// What the account page shows of the signed-in account's address: the address, whether it is proven, and — while a
@@ -418,7 +476,8 @@ public SignInStep VerifyEmail(string token, string password = "", string newPass
 public SignInStep VerifyEmailCode(string email, string code, string password = "", string newPassword = "") {
   var address = NormalisedEmail(email);
   var match = CodeMatching(LiveCodes(CodePurpose.ProveAddress, address), code);
-  if (match == null || match.Check == null || !match.Account.IsActive) {
+  // A code whose link is spent — the move it was for was called off, or proven another way — is a miss like any other.
+  if (match == null || match.Check == null || match.Check.UsedAt != null || !match.Account.IsActive) {
     UnitOfWork.Commit();   // the miss is kept: the throw below would discard it
     throw new ValidationException(WrongCode());
   }
@@ -567,13 +626,17 @@ public User Verified(string email, string password) {
 
 /// Mail `address` what proves it — a link AND a six-digit code, either one enough — for the account's own address
 /// (`isChange` false) or the one it wants to move to. The link works for three days, the code for fifteen minutes.
-void SendCheck(User account, string address, bool isChange) {
+void SendCheck(User account, string address, bool isChange) { IssueEmailCheck(account, address, isChange); }
+
+/// `SendCheck`, answering the check it recorded — for a caller that offers a way to call it off.
+internal EmailCheck IssueEmailCheck(User account, string address, bool isChange) {
   var token = Security.RandomId(32);
   var check = new EmailCheck { Account = account, Email = address, IsChange = isChange, TokenHash = TokenHash(token),
                                ExpiresAt = DateTime.UtcNow + VerificationLifetime() };
   var code = IssueCode(account, CodeChannel.Email, CodePurpose.ProveAddress, address, check: check);
   SendRendered(address, App.Setting<AccountsSetup>().Mails.Verification(account, address, AccountsLink($"/verify-email/{token}"), isChange, code),
                "verify-" + TokenHash(token));
+  return check;
 }
 
 /// A fresh verification of the account's own address, unless a code for it is still live — a sign-in that must prove the

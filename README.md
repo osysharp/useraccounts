@@ -24,7 +24,7 @@ app.Accounts = new AccountsSetup { AppName = "Acme Support", SignupRole = AppRol
 ```
 
 That is all of it. The kit serves its own pages at its own routes — `/login`, `/sign-up`, `/forgot-password`,
-`/reset-password/{token}`, `/verify-email/{token}` and `/account`, the addresses its mail links to — and wires the app's
+`/reset-password/{token}`, `/verify-email/{token}`, `/cancel-address-change/{token}` and `/account`, the addresses its mail links to — and wires the app's
 sign-in (`app.AuthBootstrap`, `app.Auth`) itself, so `osy user add` works and every flow is reachable by a signed-out
 visitor.
 
@@ -57,6 +57,10 @@ Every colour, face and size on these pages is a theme token, so the app's own th
 - **An address is proven by a message it received.** A change of address a person asks for takes effect only from a
   link sent to the NEW address, and the OLD address is told. Nothing else writes the address — not the account, not
   your staff, not a page or an API call (`deny update Email except via ConfirmAddressChange` on `User`).
+- **The old address can call a move off.** Its mail carries a single-use "This wasn't me — cancel the change" link
+  (`/cancel-address-change/{token}`): no password, because whoever asked has it. The new address's link and code then
+  confirm nothing, and every browser signed in to the account is signed out. The account page's pending-address row
+  has a Cancel of its own, for an address typed wrong.
 - **Your desk can move an account for somebody who lost their address — on the record.** A person the app names
   (`policy ChangesAccountsFor => IsDesk;` — nobody until it does) calls `ChangeAddressFor(account, newAddress,
   reason)` — "ID checked at the desk". The account moves at once; who did it, when and why is kept; the old address is
@@ -69,8 +73,8 @@ Every colour, face and size on these pages is a theme token, so the app's own th
 - **Erasing an account leaves no way in.** `EraseAccount(account)`, called from your erasure's run, clears the address,
   the name, the password, two-step sign-in, a phone, linked providers, roles, sessions, every link and code sent to it and
   the outbox's copies of that mail — and keeps the row, which work it did still names.
-- **One address, one account**, across every kind of account — and **one proven phone number, one account**: a number
-  another account has proven is refused before a code is sent, and again when one is typed.
+- **One address, one account**, across every kind of account. A phone number may be proven by several accounts (one
+  person, more than one account), each with its own code — and a number shared that way **signs in nobody by text**.
 - **Sign-up gives only the roles the app chose** (`SignupRole`, and `FirstAccountRole` for the very first account),
   never one the visitor names. `SignupOpen = false` closes it.
 - **Changing the password needs the current one**, and the account is told by mail.
@@ -224,7 +228,7 @@ The pieces are separate on purpose. The forms (`SignInForm` — which carries th
 `SignUpForm`, `ForgotPasswordForm`, `ResetPasswordForm(token)`, `VerifyEmailResult(token)`, `AccountSettings`,
 `SecondFactorEnrolment`, `RecoveryCodeList`) go in any frame of your own. The flows are ordinary functions — `SignIn`,
 `SignUp` (both answer a `SignInStep`: a ticket, a challenge, or "set it up first"), `SignInWithCode`, `RequestPasswordReset`,
-`ResetPassword`, `ChangePassword`, `ChangeEmail`, `VerifyEmail`, `EnableSecondFactor`, `DisableSecondFactor`,
+`ResetPassword`, `ChangePassword`, `ChangeEmail`, `CancelAddressChange`, `CancelMyAddressChange`, `VerifyEmail`, `EnableSecondFactor`, `DisableSecondFactor`,
 `NewRecoveryCodes`, `StartPasskeySignIn`, `SignInWithPasskey`, `AddPasskey`, `RemovePasskey`, `RemovePassword` — and an app that states its own `app.AuthBootstrap` replaces the kit's wiring whole. A sign-in that is
 not a password (a company's identity provider, a code by text message) builds on
 [Osysharp.Identity](https://osyrin.com/templates/kits/identity/) directly.

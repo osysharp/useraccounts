@@ -57,3 +57,8 @@ void MovePasskey(string from, string to) {
   PasskeyCredential.First(p => p.Account.Email == from).Account = User.Single(u => u.Email == to);
 }
 void SwapPasskeyKey(string email, string key) { PasskeyCredential.First(p => p.Account.Email == email).PublicKey = key; }
+
+// Direct writes to an address check, as whoever calls them — what an account may not do to its own pending move except
+// through `CancelMyAddressChange`.
+void PointCheckAt(string email, string other) { EmailCheck.Single(c => c.Email == email).Email = other; }
+void SpendCheck(string email) { EmailCheck.Single(c => c.Email == email).UsedAt = DateTime.UtcNow; }

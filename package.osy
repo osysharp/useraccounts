@@ -18,9 +18,10 @@
 //   account; only hashes of mailed tokens are stored. An app customises by DERIVING (`entity Employee : User { … }`) and
 //   by restyling the theme, and neither can loosen any of it.
 package Osysharp.UserAccounts {
-  version     "1.2.0";
-  // Passkeys need the platform's `WebAuthn.*` checks, the browser's `Passkey.*` verbs and the five passkey sign-in slots.
-  minPlatform "0.14.0";
+  version     "1.3.0";
+  // Passkeys need the platform's `WebAuthn.*` checks, the browser's `Passkey.*` verbs and the five passkey sign-in slots;
+  // the old address's "cancel the change" link needs the `EmailChangeCancel` slot, which no release before 0.15.1 has.
+  minPlatform "0.15.1";
   summary     "sign-in (password, or a provider such as Google or GitHub, linked from the account page), sign-up, password reset and change, verified address change (one the desk can start, confirmed from the new address) and verification, an address proven by a mailed link or code, two-step sign-in with an authenticator app and recovery codes, passkeys (several per account, to sign in with no password and no code, and to turn password sign-in off), a phone number proven by a texted code (to sign in with, or as an optional second step), and accounts made for somebody who never signs in (a child, a walk-in) by whoever the app names, given an address later — with pages — on Osysharp.Identity. Staff are given their roles with Osysharp.UserManagement.";
   // What an app using this kit usually adds next — `osy compose` and `osy lock` say it when the app does not.
   pairsWith   "Osysharp.UserManagement: an app with more than one role adds it so managers give staff their roles and take them back, with a record of who changed what";

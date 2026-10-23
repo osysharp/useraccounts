@@ -236,28 +236,82 @@ void an_apps_own_door_proves_a_number_without_a_password() {
   }
 }
 
-// SECURITY-INVARIANT(accounts-one-account-per-proven-number): a number Bo has proven is never texted a code on Ada's
-// behalf, at an app's door as at the account page — and the database refuses a second account holding it whatever path
-// writes it, which is what settles two proofs that raced past the check.
+// ⭐ ONE PHONE, SEVERAL ACCOUNTS — people may keep more than one. Ada proves the number Bo
+// has already proven — with a code texted for HER (a code texted to the same number for Bo proves nothing for her), her
+// second step works from it as his does — and then the number signs in neither of them by itself.
+// SECURITY-INVARIANT(accounts-a-shared-number-signs-in-no-one-by-itself).
 [Test(Phones)]
-void a_number_another_account_has_proven_is_refused_at_an_apps_door_too() {
-  int before = 0;
-  runas (AuthBootstrap) { before = TextsTo("+46700000002"); }
+void a_number_two_accounts_share_is_proven_by_each_and_signs_in_neither() {
+  // A code issued while the number was Bo's alone…
+  runas (AuthBootstrap) { SignInWithPhone("+46700000002"); }
+  string bosSignInCode = "";
+  runas (AuthBootstrap) { bosSignInCode = TextedCode("+46700000002"); }
+  // A code texted to prove this number for Bo, typed into Ada's proof of the same number, is a wrong code: codes are
+  // each account's own.
+  runas (AuthBootstrap) { Assert.Equal("sent", ProvePhone("bo@desk.test", "correct-horse-2", "+46700000002")); }
+  string bosProveCode = "";
+  runas (AuthBootstrap) { bosProveCode = TextedCode("+46700000002"); }
   runas (AuthBootstrap) {
-    var e = Assert.Throws(() => TextPhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46 70 000 00 02"));
-    Assert.Contains("Another account already uses that number", e.Message);
+    Assert.Throws(() => ProvePhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46700000002", bosProveCode));
   }
-  runas (AuthBootstrap) { Assert.Equal(before, TextsTo("+46700000002")); }   // nothing was texted
-  var refused = false;
-  runas (AuthBootstrap) {
-    try {
-      SetPhone("ada@desk.test", "+46700000002");
-      UnitOfWork.Commit();
-    } catch (Exception e) {
-      refused = true;
-      UnitOfWork.Discard();
-    }
-  }
-  Assert.True(refused);
   runas (Ada) { Assert.Null(Me()!.Phone); }
+  // Ada proves it with her own code.
+  runas (AuthBootstrap) { TextPhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46 70 000 00 02"); }
+  string adasCode = "";
+  runas (AuthBootstrap) { adasCode = TextedCode("+46700000002"); }
+  runas (AuthBootstrap) { ProvePhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46700000002", adasCode); }
+  runas (Ada) { Assert.Equal("+46700000002", MyPhone().Number); Assert.True(MyPhone().Proven); }
+  runas (Bo) { Assert.Equal("+46700000002", MyPhone().Number); Assert.True(MyPhone().Proven); }
+
+  // The code issued before the number was shared no longer signs Bo in.
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithPhone("+46700000002", bosSignInCode)); }
+  // Asked for a code now, the number is answered as any number is — and texted how to sign in, never a code.
+  SignInStep shared = new SignInStep();
+  SignInStep unknown = new SignInStep();
+  runas (AuthBootstrap) { shared = SignInWithPhone("+46700000002"); unknown = SignInWithPhone("+46700000009"); }
+  Assert.Equal(unknown.CodeSent, shared.CodeSent);
+  Assert.Equal(unknown.Ticket, shared.Ticket);
+  runas (AuthBootstrap) {
+    Assert.True(OutgoingSms.Any(m => m.To == "+46700000002" && m.Text.Contains("this number is on more than one account")));
+    var now = DateTime.UtcNow;
+    Assert.False(OneTimeCode.Any(c => c.Destination == "+46700000002" && c.Purpose == CodePurpose.SignIn && c.UsedAt == null
+                                      && c.ExpiresAt > now));
+  }
+
+  // Each account's second step is its own, from the same phone.
+  runas (AuthBootstrap) { SetSmsSecondStep("ada@desk.test", "correct-horse-1", true); SetSmsSecondStep("bo@desk.test", "correct-horse-2", true); }
+  foreach (var who in new List<string> { "ada@desk.test", "bo@desk.test" }) {
+    var password = who == "ada@desk.test" ? "correct-horse-1" : "correct-horse-2";
+    SignInStep first = new SignInStep();
+    runas (AuthBootstrap) { first = SignIn(who, password); }
+    Assert.Equal("sms", first.ChallengeBy);
+    string code = "";
+    runas (AuthBootstrap) { code = TextedCode("+46700000002"); }
+    string ticket = "";
+    runas (AuthBootstrap) { ticket = SignInWithCode(first.Challenge, code); }
+    Assert.NotEqual("", ticket);
+  }
+}
+
+// …and when the second account turns its texted step on, one sign-in-capable account is left behind the number: it
+// signs in by text again, and only that one.
+[Test(Phones)]
+void a_shared_number_signs_in_the_one_account_left_that_may_use_it() {
+  runas (AuthBootstrap) { TextPhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46700000002"); }
+  string adasCode = "";
+  runas (AuthBootstrap) { adasCode = TextedCode("+46700000002"); }
+  runas (AuthBootstrap) { ProvePhoneCode(User.Single(u => u.Email == "ada@desk.test"), "+46700000002", adasCode); }
+  runas (AuthBootstrap) { SetSmsSecondStep("bo@desk.test", "correct-horse-2", true); }
+  runas (AuthBootstrap) { SignInWithPhone("+46700000002"); }
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000002"); }
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithPhone("+46700000002", code); }
+  Assert.NotEqual("", step.Ticket);
+  runas (AuthBootstrap) {
+    Assert.True(OneTimeCode.Any(c => c.Destination == "+46700000002" && c.Purpose == CodePurpose.SignIn
+                                     && c.Account.Email == "ada@desk.test"));
+    Assert.False(OneTimeCode.Any(c => c.Destination == "+46700000002" && c.Purpose == CodePurpose.SignIn
+                                      && c.Account.Email == "bo@desk.test"));
+  }
 }

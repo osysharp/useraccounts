@@ -46,7 +46,7 @@ public string ProvePhone(string email, string password, string phone, string cod
 /// an `[AuthMethod]` that has established who this is in its own way (a provider's sealed sign-in, an application it is
 /// completing) and must prove a number for that account, where `ProvePhone` would ask for a password the account may not
 /// have. Texted at most once a minute and five times an hour, like every code. Throws the sentence to show for a number
-/// with no country code, or one another account has already proven.
+/// with no country code. A number other accounts have proven too is fine — one phone may serve several accounts.
 public string TextPhoneCode(User account, string phone) {
   var number = NumberThisAccountMayProve(account, phone);
   TextCode(account, CodePurpose.ProvePhone, number);
@@ -55,8 +55,8 @@ public string TextPhoneCode(User account, string phone) {
 
 /// Record `phone` as `account`'s, proven by the `code` that `TextPhoneCode` (or `ProvePhone`) texted to it — the other half
 /// of an app's own door. A wrong or spent code is a wrong try against the account, kept, and the sentence thrown; a right
-/// one records the number and tells the account's address. Throws, too, for a number another account has proven since
-/// the code was sent.
+/// one records the number and tells the account's address. Only a code texted for THIS account proves it: a code texted
+/// to the same number for another account is not one of this account's codes.
 public void ProvePhoneCode(User account, string phone, string code) {
   var number = NumberThisAccountMayProve(account, phone);
   var match = CodeMatching(LiveCodesOf(account, CodePurpose.ProvePhone, number), code);
@@ -70,24 +70,45 @@ public void ProvePhoneCode(User account, string phone, string code) {
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PhoneChanged(account, number, true));
 }
 
-/// `phone` as the kit keeps it, when the app keeps numbers and this one may be `account`'s.
+/// `phone` as the kit keeps it, when the app keeps numbers.
 ///
-/// SECURITY-INVARIANT(accounts-one-account-per-proven-number): a number proven by one account is never proven by another —
-/// every way a number is proven (`ProvePhone`, an app's door through `ProvePhoneCode`) asks here first, before a code is
-/// texted and again when it is typed. So a number already in use cannot be texted a code on another account's behalf, and
-/// a code typed after somebody else proved the number records nothing; two proofs that race past this check are settled
-/// by `User.Phone`'s `[Unique]`. Guarded by tests/sms.test.osy
-/// (a_number_another_account_has_proven_is_refused_at_an_apps_door_too).
+/// ⚑ A NUMBER MAY BE PROVEN BY SEVERAL ACCOUNTS — people may keep more than one. Each proves
+///   it with a code texted for that account alone (`LiveCodesOf` reads only the account's own codes), so proving it for
+///   one account says nothing about another, and its second step and contact use are each account's own. Where a number
+///   IDENTIFIES an account — signing in by text — a shared one identifies nobody (`SignInWithPhone`).
 string NumberThisAccountMayProve(User account, string phone) {
   if (!PhonesOffered()) { throw new ValidationException($"{AccountsAppName()} does not keep phone numbers."); }
   var number = NormalisedPhone(phone);
   if (number == "") {
     throw new ValidationException("Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67.");
   }
-  if (User.Any(u => u.Phone == number && u.PhoneVerifiedAt != null && u.Id != account.Id)) {
-    throw new ValidationException("Another account already uses that number.");
-  }
   return number;
+}
+
+/// The accounts a texted code to `number` could sign in: active, the number proven, and not one whose second step is this
+/// very phone (one phone is one factor).
+[SuppressWarning("cost-unbounded-read")]   // the accounts behind one phone number — a handful at most
+List<User> SignInHoldersOf(string number) {
+  if (number == "") { return new List<User>(); }
+  return User.Where(u => u.Phone == number && u.PhoneVerifiedAt != null && u.IsActive).ToList()
+    .Where(u => !TextedSecondStep(u)).ToList();
+}
+
+/// An account behind `number` whose second step is that phone, or null.
+[SuppressWarning("cost-unbounded-read")]   // the accounts behind one phone number — a handful at most
+User? SecondStepHolderOf(string number) {
+  if (number == "") { return null; }
+  return User.Where(u => u.Phone == number && u.PhoneVerifiedAt != null && u.IsActive).ToList()
+    .Where(u => TextedSecondStep(u)).FirstOrDefault();
+}
+
+/// Text `text` to `number` unless it was already texted there in the last hour — the same bound on a stranger's phone as
+/// the codes have.
+void TextOnceAnHour(string number, string text) {
+  var anHourAgo = DateTime.UtcNow - TimeSpan.FromHours(1);
+  if (!OutgoingSms.Any(m => m.To == number && m.Text == text && m.CreatedAt > anHourAgo)) {
+    SendSms(new SmsMessage { To = number, Text = text });
+  }
 }
 
 /// Sign in with a code texted to a proven number, in place of the password — when the app offers it (`SmsSignIn`). With no
@@ -97,28 +118,33 @@ string NumberThisAccountMayProve(User account, string phone) {
 ///
 /// ⚑ AN ACCOUNT WHOSE SECOND STEP IS THIS PHONE IS NOT SIGNED IN BY IT ALONE: one phone is one factor. It is texted how to
 ///   sign in instead (`AccountTexts.UsePasswordToSignIn`), and a code is never issued for it.
+///
+/// SECURITY-INVARIANT(accounts-a-shared-number-signs-in-no-one-by-itself): a number more than one account could sign in
+/// with identifies none of them, so it signs in nobody — no code is issued for it, the phone is texted to sign in with an
+/// address and password instead (`AccountTexts.UsePasswordOnASharedNumber`), and the caller is answered exactly as for
+/// any other number. A code issued before the number became shared is refused when typed. Never "the first account with
+/// that number": that is an arbitrary account, chosen by row order. Guarded by tests/sms.test.osy
+/// (a_number_two_accounts_share_is_proven_by_each_and_signs_in_neither).
 [AuthMethod]
 public SignInStep SignInWithPhone(string phone, string code = "") {
   if (!App.Setting<AccountsSetup>().SmsSignIn) { throw new ValidationException($"{AccountsAppName()} does not sign people in by text message."); }
   var number = NormalisedPhone(phone);
-  var account = number == "" ? null : User.FirstOrDefault(u => u.Phone == number && u.PhoneVerifiedAt != null);
+  var holders = SignInHoldersOf(number);
   if (code.Trim() == "") {
-    if (account != null && account.IsActive) {
-      if (TextedSecondStep(account)) {
-        // Told once an hour at most — the same bound on a stranger's phone as the codes have.
-        var text = App.Setting<AccountsSetup>().Texts.UsePasswordToSignIn(account);
-        var anHourAgo = DateTime.UtcNow - TimeSpan.FromHours(1);
-        if (!OutgoingSms.Any(m => m.To == number && m.Text == text && m.CreatedAt > anHourAgo)) {
-          SendSms(new SmsMessage { To = number, Text = text });
-        }
-      } else {
-        TextCode(account, CodePurpose.SignIn, number);
-      }
+    var texts = App.Setting<AccountsSetup>().Texts;
+    if (holders.Count == 1) {
+      TextCode(holders[0], CodePurpose.SignIn, number);
+    } else if (holders.Count > 1) {
+      TextOnceAnHour(number, texts.UsePasswordOnASharedNumber());
+    } else {
+      var stepHolder = SecondStepHolderOf(number);
+      if (stepHolder != null) { TextOnceAnHour(number, texts.UsePasswordToSignIn(stepHolder)); }
     }
     return new SignInStep { CodeSent = true, Account = number == "" ? "" : MaskedPhone(number) };
   }
   var match = number == "" ? null : CodeMatching(LiveCodes(CodePurpose.SignIn, number), code);
-  if (match == null || !match.Account.IsActive || TextedSecondStep(match.Account)) {
+  if (match == null || !match.Account.IsActive || TextedSecondStep(match.Account)
+      || holders.Count != 1 || holders[0].Id != match.Account.Id) {
     UnitOfWork.Commit();   // the miss is kept: the throw below would discard it
     throw new ValidationException(WrongCode());
   }

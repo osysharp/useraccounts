@@ -4,8 +4,10 @@
 //     /sign-up                 SignUpPage          /verify-email/{token}     VerifyEmailPage
 //     /forgot-password         ForgotPasswordPage  /account                  AccountPage (signed in)
 //     /oauth/sign-in           ProviderSignInPage  (where the platform brings a provider sign-in back to)
+//     /cancel-address-change/{token}   CancelAddressChangePage  (the old address's "This wasn't me" link)
 //
-// ⚑ THE ROUTES ARE THE KIT'S: its mail links to `/reset-password/{token}` and `/verify-email/{token}`, its forms link to
+// ⚑ THE ROUTES ARE THE KIT'S: its mail links to `/reset-password/{token}`, `/verify-email/{token}` and
+//   `/cancel-address-change/{token}`, its forms link to
 //   `/login`, `/sign-up`, `/forgot-password` and `/account`, and `/login` is where the platform sends a visitor who is not
 //   signed in. Every colour, face and size is a theme token, so the app's theme dresses them.
 //
@@ -47,6 +49,11 @@ public component VerifyEmailScreen(string token) {
 }
 
 [Composable]
+public component CancelAddressChangeScreen(string token) {
+  render { AccountsFrame("Cancel the address change") { CancelAddressChangeResult(token); } }
+}
+
+[Composable]
 public component ProviderSignInScreen() {
   render { AccountsFrame("Signing in") { ProviderSignIn(); } }
 }
@@ -74,6 +81,9 @@ public component ResetPasswordPage(string token) { render { ResetPasswordScreen(
 
 [Route("/verify-email/{token}")] [Title("Confirm your address")] [AllowAnonymous] [Render(CSR)]
 public component VerifyEmailPage(string token) { render { VerifyEmailScreen(token); } }
+
+[Route("/cancel-address-change/{token}")] [Title("Cancel the address change")] [AllowAnonymous] [Render(CSR)]
+public component CancelAddressChangePage(string token) { render { CancelAddressChangeScreen(token); } }
 
 [Route("/oauth/sign-in")] [Title("Signing in")] [AllowAnonymous] [Render(CSR)]
 public component ProviderSignInPage() { render { ProviderSignInScreen(); } }

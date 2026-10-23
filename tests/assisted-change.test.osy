@@ -55,6 +55,9 @@ void a_change_the_person_had_started_elsewhere_is_spent_by_the_desks() {
   Assert.NotEqual("", token);
   runas (Lead) { ChangeAddressFor(User.Single(u => u.Email == "bo@desk.test"), "bo.home@desk.test", "ID checked at the desk"); }
   runas (AuthBootstrap) {
+    // The desk's run finished — it did not fault on EmailCheck's `except via` floor part-way (0.15.1's kit stage) …
+    Assert.Equal(AddressChangeState.Moved, AddressChangeRequest.Single().State);
+    // … so the person's own pending change is spent: its OLD link moves nothing.
     Assert.Throws(() => VerifyEmail(token));
     Assert.Equal("bo.home@desk.test", User.Single(u => u.DisplayName == "Bo").Email);
   }

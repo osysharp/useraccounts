@@ -24,7 +24,13 @@ public class AccountMails {
   public virtual RenderedEmail PhoneChanged(User account, string phone, bool added) { return AccountPhoneMail(account, phone, added); }
   /// A texted code was turned on (`on`) or off as the account's second step.
   public virtual RenderedEmail TextedStepChanged(User account, bool on) { return AccountTextedStepMail(account, on); }
-  /// To the OLD address, when the account asks to move to `newAddress` — how its owner finds out when it was not them.
+  /// To the OLD address, when the account asks to move to `newAddress` — how its owner finds out when it was not them,
+  /// and `cancelLink` (single-use) calls the move off and signs every browser out.
+  public virtual RenderedEmail AddressChangeRequested(User account, string newAddress, string cancelLink) {
+    return AccountAddressChangeMail(account, newAddress, cancelLink);
+  }
+  /// The same mail with no way to call the move off. ⚠ The kit sends the one above, with its cancel link — to change
+  /// the mail an address change sends, override that one.
   public virtual RenderedEmail AddressChangeRequested(User account, string newAddress) {
     return AccountAddressChangeMail(account, newAddress);
   }
@@ -136,13 +142,18 @@ public component AccountTextedStepMail(User account, bool on) {
 }
 
 [Email]
-public component AccountAddressChangeMail(User account, string newAddress) {
+/// `cancelLink` calls the move off; "" when there is none to offer, and the mail then says only what happened.
+public component AccountAddressChangeMail(User account, string newAddress, string cancelLink = "") {
   subject => $"Your {AccountsAppName()} address is changing";
   render {
     EmailLayout(AccountsAppName(), preview: $"A request to sign in with {newAddress} instead.") {
       EmailHeading("Your address is changing");
       EmailText($"Somebody signed in as {account.Email} asked to move the account to {newAddress}. It moves once that address confirms it.");
-      EmailNote("If this was not you, change your password now: whoever asked knows it.");
+      if (cancelLink != "") {
+        EmailText("If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.");
+        EmailButton("This wasn't me — cancel the change", cancelLink);
+        EmailNote("Then choose a new password: whoever asked knows it. The link works once.");
+      }
     }
   }
 }
