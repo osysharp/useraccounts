@@ -237,3 +237,103 @@ not a password (a company's identity provider, a code by text message) builds on
 pieces: `SignUpAtDoor` makes the account (answering a taken address exactly like a new one), `TextPhoneCode` and
 `ProvePhoneCode` prove a phone for the account your door has established, and `AccountsSetup.OwnDoor` sends a provider
 sign-in for an account your door has not finished with back to the door instead of signing it in.
+
+## Examples
+
+Taken from this package's own tests, which compile and run on every release.
+
+```osy
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[Test(AssistedDesk)]
+void the_desk_moves_the_account_at_once_and_records_who_and_why() {
+  runas (Lead) { ChangeAddressFor(User.Single(u => u.Email == "bo@desk.test"), "Bo.Home@desk.test", "ID checked at the desk"); }
+  runas (AuthBootstrap) {
+    // Moved now — no confirmation from either address.
+    Assert.Equal("bo.home@desk.test", User.Single(u => u.DisplayName == "Bo").Email);
+    Assert.False(User.Any(u => u.Email == "bo@desk.test"));
+    // The record: from where, to where, why, and by whom.
+    var change = AddressChangeRequest.Single();
+    Assert.Equal("bo@desk.test", change.OldAddress);
+    Assert.Equal("bo.home@desk.test", change.NewAddress);
+    Assert.Equal("ID checked at the desk", change.Reason);
+    Assert.Equal(User.Single(u => u.Email == "lead@desk.test").Id, change.MadeBy);
+    Assert.Equal(AddressChangeState.Moved, change.State);
+    // Both addresses told; nothing to click in either.
+    Assert.Equal(1, MailsTo("bo@desk.test", "Your Kit Test Desk address was changed"));
+    Assert.Equal(1, MailsTo("bo.home@desk.test", "Your Kit Test Desk account now uses this address"));
+    Assert.Equal("", TokenIn("bo.home@desk.test", "/verify-email/"));
+    Assert.Equal("", TokenIn("bo@desk.test", "/verify-email/"));
+  }
+  // Bo signs in with the new address and the password he had.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("bo.home@desk.test", "correct-horse-2").Ticket); }
+}
+```
+
+From [`tests/assisted-change.test.osy`](tests/assisted-change.test.osy).
+
+```osy
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[Test(People)]
+void opening_the_link_proves_the_address() {
+  runas (AuthBootstrap) { SignIn("ada@desk.test", "correct-horse-1"); }   // an unproven account is sent a link
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/verify-email/"); }
+  Assert.NotEqual("", token);
+  // Ada's account had its password before its address was proven, so the link proves it WITH that password (her first
+  // proof — tests/pre-hijack.test.osy); proven, and signed in as a sign-in would be.
+  SignInStep proven = new SignInStep();
+  runas (AuthBootstrap) { proven = VerifyEmail(token, "correct-horse-1"); }
+  Assert.NotEqual("", proven.Ticket);
+  runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "ada@desk.test").EmailVerifiedAt); }
+  // Once only: opened again it signs nobody in, and says the address is already the account's.
+  SignInStep again = new SignInStep();
+  runas (AuthBootstrap) { again = VerifyEmail(token, "correct-horse-1"); }
+  Assert.True(again.AlreadyProven);
+  Assert.Equal("", again.Ticket);
+}
+```
+
+From [`tests/email.test.osy`](tests/email.test.osy).
+
+```osy
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[Test(Leaving)]
+void an_erased_account_cannot_sign_in_reset_or_be_reached() {
+  // A reset link mailed before the erasure — it must not work after it.
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
+  Assert.NotEqual("", token);
+  runas (Ada) { new AccountErasure { Account = User.Single(u => u.Email == "ada@desk.test") }; }
+  runas (AuthBootstrap) {
+    Assert.False(User.Any(u => u.Email == "ada@desk.test"));
+    var erased = User.Single(u => u.DisplayName == "" && u.Email.EndsWith("@erased.invalid"));
+    Assert.False(erased.IsActive);
+    Assert.Null(erased.PasswordHash);
+    Assert.False(RoleGrant.Any(g => g.Member == erased));
+    // …and nothing mailed to her is left in the outbox.
+    Assert.Equal(0, MailsTo("ada@desk.test", ""));
+  }
+  runas (AuthBootstrap) { Assert.Equal("", SignIn("ada@desk.test", "correct-horse-1").Ticket); }
+  runas (AuthBootstrap) { Assert.Throws(() => ResetPassword(token, "a-brand-new-one")); }
+}
+```
+
+From [`tests/erasure.test.osy`](tests/erasure.test.osy).
+
+## Learn more
+
+- [The Osysharp.UserAccounts reference](https://osysharp.com/reference/security/accounts-kit/)
+- [Osysharp.UserAccounts in the package catalogue](https://osysharp.com/packages/#osysharp-useraccounts)
+- [The Osy# reference](https://osysharp.com/reference/) — the language, the runtime and every kit
+- [`llms-full.txt`](https://osysharp.com/llms-full.txt) — the whole reference and specification as one Markdown file, for a coding agent
+
+## Licence
+
+MIT — see [`LICENSE`](LICENSE).
