@@ -234,7 +234,8 @@ not a password (a company's identity provider, a code by text message) builds on
 [Osysharp.Identity](https://osyrin.com/templates/kits/identity/) directly.
 
 **A door of your own** — say an application to a waitlist, with `SignupOpen = false` — is built from the kit's own
-pieces: `SignUpAtDoor` makes the account (answering a taken address exactly like a new one), `TextPhoneCode` and
+pieces: `SignUpAtDoor` makes the account (answering a taken address exactly like a new one) — or, for a door that asks
+for an address and nothing else, `MailDoorCode` mails a code and `ProveDoorCode` takes it back — `TextPhoneCode` and
 `ProvePhoneCode` prove a phone for the account your door has established, and `AccountsSetup.OwnDoor` sends a provider
 sign-in for an account your door has not finished with back to the door instead of signing it in.
 
@@ -276,6 +277,38 @@ From [`tests/assisted-change.test.osy`](tests/assisted-change.test.osy).
 ```osy
 using Osysharp.Identity;
 using Osysharp.UserAccounts;
+using Osysharp.Mail;
+
+[Test(DoorDesk)]
+void a_new_and_a_taken_address_are_answered_the_same_step() {
+  SignInStep fresh = new SignInStep();
+  SignInStep taken = new SignInStep();
+  runas (AuthBootstrap) {
+    fresh = MailDoorCode("newcomer@desk.test");
+    taken = MailDoorCode("ada@desk.test");
+  }
+  Assert.True(fresh.MustVerify);
+  Assert.True(taken.MustVerify);
+  Assert.Equal(fresh.Ticket, taken.Ticket);
+  Assert.Equal(fresh.Challenge, taken.Challenge);
+  Assert.Equal(fresh.MustConfirmPassword, taken.MustConfirmPassword);
+  Assert.Equal("newcomer@desk.test", fresh.Account);
+  Assert.Equal("ada@desk.test", taken.Account);
+  // Each mailbox got its code; the new address an account with nothing to sign in with, the taken one no second account.
+  Assert.Equal(1, DoorMailsTo("newcomer@desk.test"));
+  Assert.Equal(1, DoorMailsTo("ada@desk.test"));
+  runas (AuthBootstrap) {
+    Assert.Equal(1, User.Count(u => u.Email == "ada@desk.test"));
+    Assert.True(HasNoWayIn(User.Single(u => u.Email == "newcomer@desk.test")));
+  }
+}
+```
+
+From [`tests/door-code.test.osy`](tests/door-code.test.osy).
+
+```osy
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
 
 [Test(People)]
 void opening_the_link_proves_the_address() {
@@ -298,34 +331,6 @@ void opening_the_link_proves_the_address() {
 ```
 
 From [`tests/email.test.osy`](tests/email.test.osy).
-
-```osy
-using Osysharp.Identity;
-using Osysharp.UserAccounts;
-
-[Test(Leaving)]
-void an_erased_account_cannot_sign_in_reset_or_be_reached() {
-  // A reset link mailed before the erasure — it must not work after it.
-  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
-  string token = "";
-  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
-  Assert.NotEqual("", token);
-  runas (Ada) { new AccountErasure { Account = User.Single(u => u.Email == "ada@desk.test") }; }
-  runas (AuthBootstrap) {
-    Assert.False(User.Any(u => u.Email == "ada@desk.test"));
-    var erased = User.Single(u => u.DisplayName == "" && u.Email.EndsWith("@erased.invalid"));
-    Assert.False(erased.IsActive);
-    Assert.Null(erased.PasswordHash);
-    Assert.False(RoleGrant.Any(g => g.Member == erased));
-    // …and nothing mailed to her is left in the outbox.
-    Assert.Equal(0, MailsTo("ada@desk.test", ""));
-  }
-  runas (AuthBootstrap) { Assert.Equal("", SignIn("ada@desk.test", "correct-horse-1").Ticket); }
-  runas (AuthBootstrap) { Assert.Throws(() => ResetPassword(token, "a-brand-new-one")); }
-}
-```
-
-From [`tests/erasure.test.osy`](tests/erasure.test.osy).
 
 ## Learn more
 

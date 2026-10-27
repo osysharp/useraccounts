@@ -198,8 +198,86 @@ public SignInStep SignUpAtDoor(string email, string password, string name) {
   return new SignInStep { Ticket = Admit(account) };
 }
 
-/// Tell `address` it already has an account — the mail a sign-up for a taken address sends instead of a code. Once a
-/// minute, so nobody can fill a stranger's inbox from the sign-up page.
+// ── a door that asks for an address and nothing to sign in with ──────────────────────────────────────────────────
+
+/// Mail `email` a code, for an app's own door that asks for an address and nothing to sign in with — a waitlist, an
+/// application form — while the app is closed to ordinary sign-up. A new address gets an account with no password (the
+/// app's `AccountKinds.New`, and the roles a sign-up is given); an address that already has an account is mailed a code
+/// for that one. `ProveDoorCode` takes the code back. Throws the sentence to show for something that is not an address.
+///
+/// Once a minute and five times an hour per account, like every code, so nobody can fill a stranger's inbox from the
+/// page; an inactive or managed account, another kind of principal and an address no mail reaches are mailed nothing.
+///
+/// SECURITY-INVARIANT(accounts-door-code-does-not-say-who-has-an-account): every address that looks like one is answered
+/// the same `MustVerify` step — new, taken, or mailed nothing — so only the mailbox learns more. Guarded by
+/// tests/door-code.test.osy.
+public SignInStep MailDoorCode(string email, string name = "") {
+  var setup = App.Setting<AccountsSetup>();
+  var address = NormalisedEmail(email);
+  if (!LooksLikeEmail(address)) { throw new ValidationException("That does not look like an email address."); }
+  var answer = new SignInStep { MustVerify = true, Account = address };
+  if (IsUnreachableAddress(address)) { return answer; }
+  var account = User.FirstOrDefault(u => u.Email == address);
+  if (account == null) {
+    // Some other kind of account (not a `User`) has the address: it does not come in here, and a new `User` cannot take it.
+    if (Principal.Any(p => p.Email == address)) { return answer; }
+    var first = !Principal.Any(p => p.Email != address);
+    account = setup.Kinds.New(address, name.Trim());
+    if (account.Email != address) {
+      throw new ValidationException("The app's AccountKinds.New made an account for another address — it must use the one it was given.");
+    }
+    account.DisplayName = name.Trim() != "" ? name.Trim() : address.Substring(0, address.IndexOf("@"));
+    GrantNewAccountRoles(account, first);
+  }
+  if (!account.IsActive || IsManaged(account)) { return answer; }
+  // Once a minute, and five an hour: codes made in the last minute lapse after `aMinuteAgo`, the last hour's after `anHourAgo`.
+  var now = DateTime.UtcNow;
+  var aMinuteAgo = now + CodeLifetime() - TimeSpan.FromMinutes(1);
+  var anHourAgo = now + CodeLifetime() - TimeSpan.FromHours(1);
+  if (OneTimeCode.Any(c => c.Account == account && c.Purpose == CodePurpose.DoorCode && c.ExpiresAt > aMinuteAgo)) { return answer; }
+  if (OneTimeCode.Count(c => c.Account == account && c.Purpose == CodePurpose.DoorCode && c.ExpiresAt > anHourAgo) >= 5) { return answer; }
+  var code = IssueCode(account, CodeChannel.Email, CodePurpose.DoorCode, address);
+  SendRendered(address, setup.Mails.DoorCode(address, code), "door-" + Security.RandomId(16));
+  return answer;
+}
+
+/// The other half of `MailDoorCode`: the account whose address `code` was mailed to, proven by it — or throws the sentence
+/// to show for a wrong or spent code (the miss is kept and counted, as for every code). It signs nobody in: the door
+/// decides what follows, and ends in `ContinueSignIn` when it does.
+///
+/// Receiving the mail proves who holds the address, so an account that had not proven it is proven here. A password, a
+/// passkey, a linked provider or two-step sign-in set on it BEFORE that proof was set by whoever typed the address first —
+/// not necessarily its holder — so the account starts over (`StartOver`) and keeps none of them: the same rule as the
+/// first proof of an address by its link (SECURITY-INVARIANT accounts-first-proof-claims-the-account).
+/// SECURITY-INVARIANT(accounts-door-code-proof-claims-the-account): a wrong or spent code proves nothing, and the right
+/// one clears whatever was set on the account before its address was proven. Guarded by tests/door-code.test.osy
+/// (the_right_code_proves_the_address_and_clears_a_password_set_before_it, a_wrong_code_is_refused_and_proves_nothing).
+public User ProveDoorCode(string email, string code) {
+  var address = NormalisedEmail(email);
+  var match = CodeMatching(LiveCodes(CodePurpose.DoorCode, address), code);
+  if (match == null || !match.Account.IsActive || match.Account.Email != address) {
+    UnitOfWork.Commit();   // the miss is kept: the throw below would discard it
+    throw new ValidationException(WrongCode());
+  }
+  var account = match.Account;
+  if (account.EmailVerifiedAt == null) {
+    if (WaysIn(account) > 0 || account.TotpSecret != null) { StartOver(account); }
+    var now = DateTime.UtcNow;
+    account.EmailVerifiedAt = now;
+    // Any other outstanding proof of the address is spent: it is settled.
+    foreach (var other in EmailCheck.Where(c => c.Account == account && !c.IsChange && c.UsedAt == null).ToList()) { other.UsedAt = now; }
+    foreach (var other in OneTimeCode.Where(c => c.Account == account && c.Purpose == CodePurpose.ProveAddress && c.UsedAt == null).ToList()) {
+      other.UsedAt = now;
+    }
+  }
+  return account;
+}
+
+/// Has `account` no way of its own to sign in — no password, no passkey, no linked provider? An account a door made
+/// (`MailDoorCode`) has none until it chooses one (a forgotten-password link sets the first), so the door that has just
+/// proven its address may sign it in; an account with a way in signs in with that.
+public bool HasNoWayIn(User account) { return WaysIn(account) == 0 && account.TotpSecret == null; }
+
 /// The roles a NEW account is given — by a password sign-up and a provider one alike.
 /// SECURITY-INVARIANT(accounts-signup-grants-only-the-apps-choice): a new account is given the role the app named
 /// (`SignupRole`) and, when it is the first account, `FirstAccountRole` — never a role the visitor chose. Guarded by
@@ -219,6 +297,8 @@ void GrantNewAccountRoles(User account, bool first) {
   }
 }
 
+/// Tell `address` it already has an account — the mail a sign-up for a taken address sends instead of a code. Once a
+/// minute, so nobody can fill a stranger's inbox from the sign-up page.
 void TellAddressIsTaken(string address) {
   var mail = App.Setting<AccountsSetup>().Mails.AccountExists(address, AccountsLink("/login"), AccountsLink("/forgot-password"));
   var aMinuteAgo = DateTime.UtcNow - TimeSpan.FromMinutes(1);

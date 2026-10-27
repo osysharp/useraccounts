@@ -1,0 +1,99 @@
+// AN APP'S OWN DOOR — an address and nothing to sign in with (`MailDoorCode`, `ProveDoorCode`): a waitlist or an
+// application form, while the app is closed to ordinary sign-up. Two properties a door like that must keep:
+//
+//   • SECURITY-INVARIANT(accounts-door-code-does-not-say-who-has-an-account): every address is answered the same step —
+//     new or taken — so the page tells nobody whether an address has an account; only the mailbox learns more.
+//   • SECURITY-INVARIANT(accounts-door-code-proof-claims-the-account): the right code proves the address, and a password
+//     somebody set on the account BEFORE the address was proven is cleared — whoever typed the address first is not
+//     necessarily its holder. A wrong code proves nothing.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+using Osysharp.Mail;
+
+[TestFixture]
+void DoorDesk() {
+  // Somebody already here, with a proven address and a password of their own.
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+             EmailVerifiedAt = DateTime.UtcNow };
+}
+
+// `Proven` and `Opens` are pre-hijack.test.osy's (one tests app, one namespace).
+
+int DoorMailsTo(string to) {
+  int n = 0;
+  runas (AuthBootstrap) {
+    n = OutgoingMail.Count(m => m.To == to && m.Text != null && m.Text.Contains("Type this code where you were asked for it: "));
+  }
+  return n;
+}
+
+// ── the answer says nothing about who has an account ────────────────────────────────────────────────────────────
+
+[Test(DoorDesk)]
+void a_new_and_a_taken_address_are_answered_the_same_step() {
+  SignInStep fresh = new SignInStep();
+  SignInStep taken = new SignInStep();
+  runas (AuthBootstrap) {
+    fresh = MailDoorCode("newcomer@desk.test");
+    taken = MailDoorCode("ada@desk.test");
+  }
+  Assert.True(fresh.MustVerify);
+  Assert.True(taken.MustVerify);
+  Assert.Equal(fresh.Ticket, taken.Ticket);
+  Assert.Equal(fresh.Challenge, taken.Challenge);
+  Assert.Equal(fresh.MustConfirmPassword, taken.MustConfirmPassword);
+  Assert.Equal("newcomer@desk.test", fresh.Account);
+  Assert.Equal("ada@desk.test", taken.Account);
+  // Each mailbox got its code; the new address an account with nothing to sign in with, the taken one no second account.
+  Assert.Equal(1, DoorMailsTo("newcomer@desk.test"));
+  Assert.Equal(1, DoorMailsTo("ada@desk.test"));
+  runas (AuthBootstrap) {
+    Assert.Equal(1, User.Count(u => u.Email == "ada@desk.test"));
+    Assert.True(HasNoWayIn(User.Single(u => u.Email == "newcomer@desk.test")));
+  }
+}
+
+[Test(DoorDesk)]
+void a_second_code_within_the_minute_is_not_sent() {
+  runas (AuthBootstrap) { MailDoorCode("newcomer@desk.test"); }
+  SignInStep again = new SignInStep();
+  runas (AuthBootstrap) { again = MailDoorCode("newcomer@desk.test"); }
+  Assert.True(again.MustVerify);                                   // the same answer…
+  Assert.Equal(1, DoorMailsTo("newcomer@desk.test"));              // …and no second mail to fill the inbox with
+}
+
+// ── the code proves the address, and only the right one ─────────────────────────────────────────────────────────
+
+[Test(DoorDesk)]
+void a_wrong_code_is_refused_and_proves_nothing() {
+  runas (AuthBootstrap) { MailDoorCode("newcomer@desk.test"); }
+  string right = "";
+  runas (AuthBootstrap) { right = CodeIn("newcomer@desk.test"); }
+  var wrong = right == "000000" ? "111111" : "000000";
+  runas (AuthBootstrap) {
+    var e = Assert.Throws<ValidationException>(() => ProveDoorCode("newcomer@desk.test", wrong));
+    Assert.Contains("That code is not right", e.Message);
+  }
+  Assert.False(Proven("newcomer@desk.test"));
+  // …and another address's right code is not this one's.
+  runas (AuthBootstrap) { Assert.Throws<ValidationException>(() => ProveDoorCode("ada@desk.test", right)); }
+}
+
+[Test(DoorDesk)]
+void the_right_code_proves_the_address_and_clears_a_password_set_before_it() {
+  // A stranger signs up first with somebody else's address and a password of their own; the address is not proven.
+  runas (AuthBootstrap) { SignUp("owner@desk.test", "strangers-password-1", "Mallory"); }
+  Assert.False(Proven("owner@desk.test"));
+  Assert.True(Opens("owner@desk.test", "strangers-password-1"));
+
+  // The address's holder comes through the app's door and types the code the mail carried.
+  runas (AuthBootstrap) { MailDoorCode("owner@desk.test"); }
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("owner@desk.test"); }
+  runas (AuthBootstrap) { Assert.Equal("owner@desk.test", ProveDoorCode("owner@desk.test", code).Email); }
+
+  Assert.True(Proven("owner@desk.test"));
+  Assert.False(Opens("owner@desk.test", "strangers-password-1"));  // the stranger's password is gone
+  runas (AuthBootstrap) { Assert.True(HasNoWayIn(User.Single(u => u.Email == "owner@desk.test"))); }
+}

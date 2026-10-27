@@ -32,6 +32,9 @@ public enum CodePurpose {
   /// Proves, now, that the signed-in person controls the account's address before they make a request about their
   /// personal data (`StartStepUp`) — a session left open on a shared computer cannot make one.
   PrivacyRequest,
+  /// Confirms an address at an app's own door that asks for nothing to sign in with — a waitlist, an application form
+  /// (`MailDoorCode`, `ProveDoorCode`). Mailed alone, with no link: the door it finishes is the page that asked.
+  DoorCode,
 }
 
 /// A six-digit code sent to `Destination` for `Purpose`.

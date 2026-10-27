@@ -7,7 +7,7 @@ translations sv {
   // ── AccountAddressChangeMail ──
   /// AccountAddressChangeMail · a button's label · at most ~48 characters
   /// shown through EmailButton.label
-  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "Then choose a new password: whoever asked knows it. The link works once."
+  /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "Then choose a new password: whoever asked knows it. The link works once."
   button "This wasn't me — cancel the change" => "Det var inte jag, avbryt ändringen";
   /// AccountAddressChangeMail · the preview line an inbox shows beside an email's subject
   /// placeholders: {newAddress} = newAddress (string)
@@ -18,20 +18,19 @@ translations sv {
   mailSubject "Your {AccountsAppName} address is changing" => "Din adress hos {AccountsAppName} ändras";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailText.text
-  /// beside: "Your address is changing", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
+  /// beside: "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
   text "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out." => "Om det inte var du, avbryt den: flytten stoppas och alla webbläsare som är inloggade på ditt konto loggas ut.";
   /// AccountAddressChangeMail · text on the page
   /// placeholders: {account.Email} = account.Email (string), {newAddress} = newAddress (string)
   /// shown through EmailText.text
-  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
+  /// beside: "Your address is changing"
   text "Somebody signed in as {account.Email} asked to move the account to {newAddress}. It moves once that address confirms it." => "Någon som är inloggad som {account.Email} har bett om att flytta kontot till {newAddress}. Det flyttas när den adressen har bekräftat det.";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailNote.text
-  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
+  /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
   text "Then choose a new password: whoever asked knows it. The link works once." => "Välj sedan ett nytt lösenord: den som bad om ändringen känner till det. Länken fungerar en gång.";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailHeading.text
-  /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
   text "Your address is changing" => "Din adress ändras";
 
   // ── AccountAddressChangedMail ──
@@ -76,6 +75,38 @@ translations sv {
   /// shown through EmailText.text
   /// beside: "Welcome to your account at this address", "Forgotten the password? Choose a new one from the sign-in page: the link comes here now."
   text "Your {AccountsAppName} account, which used {oldAddress}, now signs in with this address — with the same password. There is nothing you need to do." => "Ditt konto hos {AccountsAppName}, som använde {oldAddress}, loggar nu in med den här adressen — med samma lösenord. Du behöver inte göra något.";
+
+  // ── AccountDoorCodeMail ──
+  /// AccountDoorCodeMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {code} = code (string)
+  /// shown through EmailLayout.preview
+  /// also in AccountStepUpMail
+  mailPreview "Your code is {code}." => "Din kod är {code}.";
+  /// AccountDoorCodeMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// also in AccountStepUpMail
+  mailSubject "Your code for {AccountsAppName}" => "Din kod för {AccountsAppName}";
+  /// AccountDoorCodeMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes."
+  /// also in AccountVerifyMail
+  text "Confirm your address" => "Bekräfta din adress";
+  /// AccountDoorCodeMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {address} = address (string)
+  /// shown through EmailText.text
+  /// beside: "Confirm your address", "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes."
+  text "Somebody — we hope you — asked {AccountsAppName} to confirm {address}." => "Någon, förhoppningsvis du, bad {AccountsAppName} att bekräfta {address}.";
+  /// AccountDoorCodeMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Confirm your address"
+  text "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes." => "Koden gäller i femton minuter. Om du inte bad om det kan du strunta i det här mejlet, ingenting ändras.";
+  /// AccountDoorCodeMail · text on the page
+  /// placeholders: {code} = code (string)
+  /// shown through EmailText.text
+  /// beside: "Confirm your address", "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes."
+  /// also in AccountVerifyMail
+  /// also in AccountStepUpMail
+  text "Type this code where you were asked for it: {code}" => "Skriv in den här koden där du blev ombedd: {code}";
 
   // ── AccountExistsMail ──
   /// AccountExistsMail · a button's label · at most ~13 characters
@@ -590,13 +621,6 @@ translations sv {
   title "Two-step sign-in" => "Tvåstegsinloggning";
 
   // ── AccountStepUpMail ──
-  /// AccountStepUpMail · the preview line an inbox shows beside an email's subject
-  /// placeholders: {code} = code (string)
-  /// shown through EmailLayout.preview
-  mailPreview "Your code is {code}." => "Din kod är {code}.";
-  /// AccountStepUpMail · an email's subject line
-  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
-  mailSubject "Your code for {AccountsAppName}" => "Din kod för {AccountsAppName}";
   /// AccountStepUpMail · text on the page
   /// shown through EmailHeading.text
   /// beside: "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes — and consider changing your password."
@@ -679,20 +703,10 @@ translations sv {
   /// AccountVerifyMail · text on the page
   /// shown through EmailHeading.text
   /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
-  text "Confirm your address" => "Bekräfta din adress";
-  /// AccountVerifyMail · text on the page
-  /// shown through EmailHeading.text
-  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
   text "Confirm your new address" => "Bekräfta din nya adress";
   /// AccountVerifyMail · text on the page
   /// shown through EmailNote.text
   text "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes." => "Koden gäller i femton minuter och länken i tre dagar. Om du inte bad om det kan du strunta i det här mejlet, ingenting ändras.";
-  /// AccountVerifyMail · text on the page
-  /// placeholders: {code} = code (string)
-  /// shown through EmailText.text
-  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
-  /// also in AccountStepUpMail
-  text "Type this code where you were asked for it: {code}" => "Skriv in den här koden där du blev ombedd: {code}";
   /// AccountVerifyMail · text on the page
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {address} = address (string)
   /// shown through EmailText.text
@@ -819,7 +833,7 @@ translations sv {
   /// shown through ValidationException
   /// also in GiveManagedAccountAnAddress
   /// also in SignUpAtDoor
-  /// also in ChangeEmail
+  /// also in MailDoorCode
   error "That does not look like an email address." => "Det ser inte ut som en e-postadress.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
@@ -1034,6 +1048,7 @@ translations sv {
   /// shown through ValidationException
   /// also in SignUpWithProvider
   /// also in SignUpAtDoor
+  /// also in MailDoorCode
   error "The app's AccountKinds.New made an account for another address — it must use the one it was given." => "Appens AccountKinds.New skapade ett konto för en annan adress. Den måste använda den adress den fick.";
 
   // ── NewRecoveryCodes ──

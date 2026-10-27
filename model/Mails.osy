@@ -66,6 +66,21 @@ public class AccountMails {
   public virtual RenderedEmail PasswordRemoved(User account) { return AccountPasswordRemovedMail(account); }
   /// The code that proves it is you, now, for `purpose` (`StartStepUp`).
   public virtual RenderedEmail StepUpCode(User account, string code, CodePurpose purpose) { return AccountStepUpMail(account, code, purpose); }
+  /// The code an app's own door mailed to `address` (`MailDoorCode`) — a code alone, typed on the page that asked.
+  public virtual RenderedEmail DoorCode(string address, string code) { return AccountDoorCodeMail(address, code); }
+}
+
+[Email]
+public component AccountDoorCodeMail(string address, string code) {
+  subject => $"Your code for {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: $"Your code is {code}.") {
+      EmailHeading("Confirm your address");
+      EmailText($"Somebody — we hope you — asked {AccountsAppName()} to confirm {address}.");
+      EmailText($"Type this code where you were asked for it: {code}");
+      EmailNote("The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes.");
+    }
+  }
 }
 
 [Email]

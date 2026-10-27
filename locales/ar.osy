@@ -7,7 +7,7 @@ translations ar {
   // ── AccountAddressChangeMail ──
   /// AccountAddressChangeMail · a button's label · at most ~48 characters
   /// shown through EmailButton.label
-  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "Then choose a new password: whoever asked knows it. The link works once."
+  /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "Then choose a new password: whoever asked knows it. The link works once."
   button "This wasn't me — cancel the change" => "لم أكن أنا، ألغِ التغيير";
   /// AccountAddressChangeMail · the preview line an inbox shows beside an email's subject
   /// placeholders: {newAddress} = newAddress (string)
@@ -18,20 +18,19 @@ translations ar {
   mailSubject "Your {AccountsAppName} address is changing" => "عنوانك في {AccountsAppName} يتغير";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailText.text
-  /// beside: "Your address is changing", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
+  /// beside: "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
   text "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out." => "إذا لم تكن أنت، فألغِه: يتوقف النقل، ويُسجَّل خروج كل متصفح مسجَّل الدخول إلى حسابك.";
   /// AccountAddressChangeMail · text on the page
   /// placeholders: {account.Email} = account.Email (string), {newAddress} = newAddress (string)
   /// shown through EmailText.text
-  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
+  /// beside: "Your address is changing"
   text "Somebody signed in as {account.Email} asked to move the account to {newAddress}. It moves once that address confirms it." => "طلب شخص مسجّل الدخول باسم {account.Email} نقل الحساب إلى {newAddress}. سينتقل الحساب بمجرد تأكيد ذلك العنوان.";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailNote.text
-  /// beside: "Your address is changing", "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
+  /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
   text "Then choose a new password: whoever asked knows it. The link works once." => "ثم اختر كلمة مرور جديدة: من طلب التغيير يعرفها. يعمل الرابط مرة واحدة.";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailHeading.text
-  /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change", "Then choose a new password: whoever asked knows it. The link works once."
   text "Your address is changing" => "عنوانك يتغير";
 
   // ── AccountAddressChangedMail ──
@@ -76,6 +75,38 @@ translations ar {
   /// shown through EmailText.text
   /// beside: "Welcome to your account at this address", "Forgotten the password? Choose a new one from the sign-in page: the link comes here now."
   text "Your {AccountsAppName} account, which used {oldAddress}, now signs in with this address — with the same password. There is nothing you need to do." => "حسابك في {AccountsAppName}، الذي كان يستخدم {oldAddress}، يسجّل الدخول الآن بهذا العنوان — بكلمة المرور نفسها. لا يلزمك فعل شيء.";
+
+  // ── AccountDoorCodeMail ──
+  /// AccountDoorCodeMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {code} = code (string)
+  /// shown through EmailLayout.preview
+  /// also in AccountStepUpMail
+  mailPreview "Your code is {code}." => "رمزك هو {code}.";
+  /// AccountDoorCodeMail · an email's subject line
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// also in AccountStepUpMail
+  mailSubject "Your code for {AccountsAppName}" => "رمزك لـ {AccountsAppName}";
+  /// AccountDoorCodeMail · text on the page
+  /// shown through EmailHeading.text
+  /// beside: "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes."
+  /// also in AccountVerifyMail
+  text "Confirm your address" => "أكّد عنوانك";
+  /// AccountDoorCodeMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {address} = address (string)
+  /// shown through EmailText.text
+  /// beside: "Confirm your address", "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes."
+  text "Somebody — we hope you — asked {AccountsAppName} to confirm {address}." => "طلب شخص ما، ونأمل أن تكون أنت، من {AccountsAppName} تأكيد {address}.";
+  /// AccountDoorCodeMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Confirm your address"
+  text "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes." => "الرمز صالح لمدة خمس عشرة دقيقة. إن لم تطلب ذلك، فتجاهل هذه الرسالة، ولن يتغير شيء.";
+  /// AccountDoorCodeMail · text on the page
+  /// placeholders: {code} = code (string)
+  /// shown through EmailText.text
+  /// beside: "Confirm your address", "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes."
+  /// also in AccountVerifyMail
+  /// also in AccountStepUpMail
+  text "Type this code where you were asked for it: {code}" => "اكتب هذا الرمز حيث طُلب منك: {code}";
 
   // ── AccountExistsMail ──
   /// AccountExistsMail · a button's label · at most ~13 characters
@@ -590,13 +621,6 @@ translations ar {
   title "Two-step sign-in" => "تسجيل الدخول بخطوتين";
 
   // ── AccountStepUpMail ──
-  /// AccountStepUpMail · the preview line an inbox shows beside an email's subject
-  /// placeholders: {code} = code (string)
-  /// shown through EmailLayout.preview
-  mailPreview "Your code is {code}." => "رمزك هو {code}.";
-  /// AccountStepUpMail · an email's subject line
-  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
-  mailSubject "Your code for {AccountsAppName}" => "رمزك لـ {AccountsAppName}";
   /// AccountStepUpMail · text on the page
   /// shown through EmailHeading.text
   /// beside: "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes — and consider changing your password."
@@ -679,20 +703,10 @@ translations ar {
   /// AccountVerifyMail · text on the page
   /// shown through EmailHeading.text
   /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
-  text "Confirm your address" => "أكّد عنوانك";
-  /// AccountVerifyMail · text on the page
-  /// shown through EmailHeading.text
-  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
   text "Confirm your new address" => "أكّد عنوانك الجديد";
   /// AccountVerifyMail · text on the page
   /// shown through EmailNote.text
   text "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes." => "الرمز صالح لمدة خمس عشرة دقيقة، والرابط لمدة ثلاثة أيام. إن لم تطلب ذلك، فتجاهل هذه الرسالة، ولن يتغير شيء.";
-  /// AccountVerifyMail · text on the page
-  /// placeholders: {code} = code (string)
-  /// shown through EmailText.text
-  /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
-  /// also in AccountStepUpMail
-  text "Type this code where you were asked for it: {code}" => "اكتب هذا الرمز حيث طُلب منك: {code}";
   /// AccountVerifyMail · text on the page
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string), {address} = address (string)
   /// shown through EmailText.text
@@ -819,7 +833,7 @@ translations ar {
   /// shown through ValidationException
   /// also in GiveManagedAccountAnAddress
   /// also in SignUpAtDoor
-  /// also in ChangeEmail
+  /// also in MailDoorCode
   error "That does not look like an email address." => "لا يبدو هذا عنوان بريد إلكتروني.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
@@ -1034,6 +1048,7 @@ translations ar {
   /// shown through ValidationException
   /// also in SignUpWithProvider
   /// also in SignUpAtDoor
+  /// also in MailDoorCode
   error "The app's AccountKinds.New made an account for another address — it must use the one it was given." => "أنشأ AccountKinds.New في التطبيق حسابًا لعنوان آخر، ويجب أن يستخدم العنوان الذي أُعطي له.";
 
   // ── NewRecoveryCodes ──
