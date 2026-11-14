@@ -99,6 +99,13 @@ bool MustProveAddress(User account) {
 /// only after `Required`, and `SignInWithCode` refuses a texted code for such an account. A SIM swap or a port-out moves
 /// a number to somebody else (NIST 800-63B "restricted"), so it is an account's choice, never an app's demand. Guarded by
 /// tests/sms.test.osy.
+///
+/// SECURITY-INVARIANT(accounts-ticket-only-from-the-sign-in-flow): it ends in a ticket for the account it is HANDED, so
+/// only the sign-in flow may call it — an `[AuthMethod]` (which runs only as the sign-in flow) or code inside
+/// `runas (AuthBootstrap)`. Called by a signed-in account it would sign that account in as anybody it could read; the
+/// guard refuses at the call, before the first statement (a request's run never commits, so a refused write later on
+/// would come after the ticket was already answered). Guarded by tests/ticket-only-in-sign-in.test.osy.
+[Authorize(IsAuthenticator)]
 public SignInStep ContinueSignIn(User account) {
   // The address comes before the second factor, here as on the password door: an app's own door (an invitation that
   // proves nothing about the address typed, say) ends here, so without this it would hand an unproven address a ticket
@@ -180,7 +187,7 @@ public SignInStep SignUpAtDoor(string email, string password, string name) {
     TellAddressIsTaken(address);
     return new SignInStep { MustVerify = true, Account = address };
   }
-  var first = !Principal.Any(p => p.Email != address);
+  var first = IsFirstPerson(address);
   var now = DateTime.UtcNow;
   // The app's own kind of account, when it has one (`AccountKinds`); the kit sets what sign-in rests on.
   var account = setup.Kinds.New(address, name.Trim());
@@ -221,7 +228,7 @@ public SignInStep MailDoorCode(string email, string name = "") {
   if (account == null) {
     // Some other kind of account (not a `User`) has the address: it does not come in here, and a new `User` cannot take it.
     if (Principal.Any(p => p.Email == address)) { return answer; }
-    var first = !Principal.Any(p => p.Email != address);
+    var first = IsFirstPerson(address);
     account = setup.Kinds.New(address, name.Trim());
     if (account.Email != address) {
       throw new ValidationException("The app's AccountKinds.New made an account for another address — it must use the one it was given.");
@@ -278,10 +285,27 @@ public User ProveDoorCode(string email, string code) {
 /// proven its address may sign it in; an account with a way in signs in with that.
 public bool HasNoWayIn(User account) { return WaysIn(account) == 0 && account.TotpSecret == null; }
 
+/// Is `address` the first PERSON to have an account here — the one given `FirstAccountRole`? A declared actor's account
+/// (a workflow's, an agent's) is the platform's, made at deploy before anybody signs up, and is not counted
+/// (SECURITY-INVARIANT an-actor-account-is-known-by-its-id: its id says so, and no app code can write an id).
+/// ⚑ This kit ships with the platform and is compiled by the platform it is deployed onto, which may be older than this
+/// checkout: a kit keeps working on the oldest runtime it is deployed onto. `Actor.PrincipalIds()` is
+/// what a platform defining `OSY_ACTOR_PRINCIPAL_IDS` has; an older one compiles the `#else` — the rule it shipped with,
+/// which counts every account but the one signing up.
+bool IsFirstPerson(string address) {
+#if OSY_ACTOR_PRINCIPAL_IDS
+  var actors = Actor.PrincipalIds();
+  return !Principal.Any(p => p.Email != address && !actors.Contains(p.Id));
+#else
+  return !Principal.Any(p => p.Email != address);
+#endif
+}
+
 /// The roles a NEW account is given — by a password sign-up and a provider one alike.
 /// SECURITY-INVARIANT(accounts-signup-grants-only-the-apps-choice): a new account is given the role the app named
 /// (`SignupRole`) and, when it is the first account, `FirstAccountRole` — never a role the visitor chose. Guarded by
-/// tests/signin.test.osy (the_first_account_ever_is_given_the_first_account_role_too).
+/// tests/signin.test.osy (the_first_account_ever_is_given_the_first_account_role_too; and
+/// an_actors_account_made_first_does_not_take_the_first_account_role — the first PERSON, `IsFirstPerson`).
 /// Each is told to the app (`RolesSetup.Events.Granted`) by a run, as the system, in this same commit — RolesTold.osy.
 void GrantNewAccountRoles(User account, bool first) {
   var setup = App.Setting<AccountsSetup>();

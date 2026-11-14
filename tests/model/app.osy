@@ -170,3 +170,10 @@ string? MyTotpSecret() {
 /// Write an account's two-step secret directly, as whoever calls it — what the security tests expect to be refused.
 void SetTotpSecret(string email, string? value) { User.Single(u => u.Email == email).TotpSecret = value; }
 
+
+/// A declared actor — what a workflow or an agent of the app runs as. Its account is the platform's, made before anybody
+/// signs up, and is never "the first account".
+[Actor]
+public class DeskRobot {
+  public static User Principal => new User { Email = "desk-robot@desk.test", DisplayName = "Desk robot" };
+}

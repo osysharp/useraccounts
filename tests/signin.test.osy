@@ -84,6 +84,25 @@ void the_first_account_ever_is_given_the_first_account_role_too() {
   runas (Sid) { Assert.False(RoleGrant.Any(g => g.Member == Sid && g.Role == AppRole.Admin)); }
 }
 
+/// A declared actor's account — a workflow's, an agent's — is made at deploy, before anybody signs up. It is not a
+/// person, so the first PERSON to sign up is still the one given the first account's role.
+[Test]
+void an_actors_account_made_first_does_not_take_the_first_account_role() {
+  var robot = Actor.Of<DeskRobot>();
+  runas (AuthBootstrap) { SignUp("founder@desk.test", "a-long-password", "Fay"); }
+  runas (Fay) { Assert.True(RoleGrant.Any(g => g.Member == Fay && g.Role == AppRole.Admin)); }
+  runas (AuthBootstrap) { SignUp("second@desk.test", "a-long-password", "Sid"); }
+  runas (Sid) { Assert.False(RoleGrant.Any(g => g.Member == Sid && g.Role == AppRole.Admin)); }
+  Assert.NotNull(robot);
+}
+
+/// A test starts where production does: the declared actors' accounts were made when the app was deployed, before
+/// the test's first line — nothing here asks for the robot, and it is already there.
+[Test]
+void a_declared_actors_account_is_there_before_anybody_uses_it() {
+  runas (AuthBootstrap) { Assert.True(Principal.Any(p => p.Email == "desk-robot@desk.test")); }
+}
+
 /// The app is told of each role a sign-up gives (`RolesSetup.Events.Granted`), as it is of one the user manager or an
 /// invitation gives — by a run, as the system: `RoleTold` grants nobody a create, so a telling made as the sign-in flow
 /// would be refused and the sign-up with it.

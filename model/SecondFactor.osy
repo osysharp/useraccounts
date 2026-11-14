@@ -313,6 +313,13 @@ string RecoveryFingerprint(string code) { return Security.Fingerprint("recovery-
 
 /// Signed in: the ticket, when, and the app told (`AccountsSetup.Events`). Every ticket the kit issues for a sign-in
 /// comes from here, so an app's sign-in history misses no way in.
+///
+/// SECURITY-INVARIANT(accounts-ticket-only-from-the-sign-in-flow): only the sign-in flow may call it — the kit's own
+/// sign-in steps (each an `[AuthMethod]`, which runs only as the sign-in flow), after they have proven who this is. It
+/// signs in WHICHEVER account it is handed, so open it was an account takeover for any code (or, named by a request, any
+/// signed-in caller) that could read another account. Refused at the call, before its first statement. Guarded by
+/// tests/ticket-only-in-sign-in.test.osy. (`internal` waits for the kit's next major release, because it removes a public function.)
+[Authorize(IsAuthenticator)]
 string Admit(User account) {
   var at = DateTime.UtcNow;
   account.LastLoginAt = at;

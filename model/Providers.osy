@@ -82,7 +82,7 @@ public SignInStep SignInWithProvider(string pendingToken) {
 /// after it (setting two-step sign-in up first, when the app requires it).
 SignInStep SignUpWithProvider(string pendingToken, string address) {
   var setup = App.Setting<AccountsSetup>();
-  var first = !Principal.Any(p => p.Email != address);
+  var first = IsFirstPerson(address);
   var now = DateTime.UtcNow;
   var given = Security.PendingOAuthName(pendingToken).Trim();
   var account = setup.Kinds.New(address, given);

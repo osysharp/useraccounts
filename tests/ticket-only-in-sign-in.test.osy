@@ -1,0 +1,45 @@
+// A sign-in ticket is the sign-in flow's to hand out, and nobody else's (HEL-A-EXPOSURE row 1, 0.19.13 hotfix).
+// `Admit` signs in the account it is handed, and `ContinueSignIn` (an app's own door ends in it) ends in `Admit`; run by a
+// signed-in account rather than by the sign-in flow, either handed that account a ticket for ANY account it could read —
+// an account takeover. Both are refused AT THE CALL, by their guard — not later, by the `LastLoginAt` write a request's
+// run never commits (over `POST /fn/{id}` that write was refused only at a commit that never came, and the ticket was
+// already answered).
+// SECURITY-INVARIANT(accounts-ticket-only-from-the-sign-in-flow), SignIn.osy.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void AdaAndMallory() {
+  new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+             EmailVerifiedAt = DateTime.UtcNow };
+  new User { Email = "mallory@desk.test", DisplayName = "Mallory", PasswordHash = Security.HashPassword("correct-horse-2"),
+             EmailVerifiedAt = DateTime.UtcNow };
+}
+
+principal Mallory => User.Single(u => u.Email == "mallory@desk.test");
+
+[Test(AdaAndMallory)]
+void a_signed_in_account_cannot_continue_another_accounts_sign_in() {
+  // Mallory reads Ada's account (any signed-in account may), and asks for the step that ends in Ada's ticket.
+  runas (Mallory) {
+    var ada = User.Single(u => u.Email == "ada@desk.test");
+    Assert.Contains("IsAuthenticator", Assert.Throws<NotAuthorized>(() => ContinueSignIn(ada)).Message);
+  }
+  // The control: the sign-in flow itself still continues Ada's sign-in to her ticket.
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = ContinueSignIn(User.Single(u => u.Email == "ada@desk.test")); }
+  Assert.NotNull(step.Ticket);
+}
+
+[Test(AdaAndMallory)]
+void a_signed_in_account_cannot_admit_another_account() {
+  runas (Mallory) {
+    var ada = User.Single(u => u.Email == "ada@desk.test");
+    Assert.Contains("IsAuthenticator", Assert.Throws<NotAuthorized>(() => Admit(ada)).Message);
+  }
+  // The control: the sign-in flow's own call still answers the ticket.
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = Admit(User.Single(u => u.Email == "ada@desk.test")); }
+  Assert.NotEqual("", ticket);
+}

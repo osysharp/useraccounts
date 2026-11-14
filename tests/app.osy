@@ -14,5 +14,7 @@ app AccountsKitTests {
   use Osysharp.Storage;
   // Provider sign-in: `app.OAuthClients` below.
   use Osysharp.Oauth;
+  // The change trail an app with a declared actor keeps (`DeskRobot`, tests/model/app.osy).
+  use Osysharp.Observability;
 }
 
