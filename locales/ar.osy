@@ -473,10 +473,16 @@ translations ar {
   /// AccountSettings · a button's label · at most ~30 characters
   /// shown through Button.label
   button "Use a passkey instead" => "استخدم مفتاح مرور بدلًا من ذلك";
+  /// AccountSettings · a button's label · at most ~24 characters
+  /// shown through Button.label
+  button "Use it for texts…" => "استخدمه للرسائل النصية…";
   /// AccountSettings · a description
   /// shown through SettingsSection.description
   /// beside: "Address", "Password", "Passkeys"
   description "A code from an app on your phone after your password, so a stolen password is not enough." => "رمز من تطبيق على هاتفك بعد كلمة المرور، فلا تكفي كلمة مرور مسروقة.";
+  /// AccountSettings · a description
+  /// shown through SettingsSection.description
+  description "A number to reach you on. Texts go only to a mobile, once a code confirms it." => "رقم يمكن الوصول إليك عليه. لا تُرسَل الرسائل النصية إلا إلى رقم جوال بعد تأكيده برمز.";
   /// AccountSettings · a description
   /// shown through SettingsSection.description
   description "Another account that signs you in here." => "حساب آخر يسجّل دخولك هنا.";
@@ -488,9 +494,6 @@ translations ar {
   /// shown through SettingsSection.description
   /// beside: "Password", "Passkeys", "Two-step sign-in"
   description "Where your mail goes, and how you sign in." => "أين يصل بريدك، وكيف تسجّل الدخول.";
-  /// AccountSettings · a description
-  /// shown through SettingsSection.description
-  description "With its country code. A text proves it is yours." => "مع رمز الدولة. رسالة نصية تثبت أنه رقمك.";
   /// AccountSettings · a description
   /// shown through SettingsSection.description
   /// beside: "Address", "Password", "Two-step sign-in"
@@ -507,6 +510,9 @@ translations ar {
   hint "We mail it a link; your account moves to it when the link is opened." => "نرسل إليه رابطًا بالبريد، وينتقل حسابك إليه عند فتح الرابط.";
   /// AccountSettings · a hint under a field
   /// shown through Field.hint
+  hint "With its country code. Any number — a landline too." => "مع رمز البلد. أي رقم — حتى الهاتف الأرضي.";
+  /// AccountSettings · a hint under a field
+  /// shown through Field.hint
   hint "With its country code. We text it a code to confirm it is yours." => "مع رمز البلد. سنرسل إليه رمزًا في رسالة نصية للتأكد من أنه رقمك.";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~26 characters
   /// shown through Field.label
@@ -521,6 +527,12 @@ translations ar {
   /// beside: "Code from your app"
   /// also in ProviderSignIn
   label "Current password" => "كلمة المرور الحالية";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~15 characters
+  /// shown through Badge.label
+  label "For calls" => "للمكالمات";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~15 characters
+  /// shown through Badge.label
+  label "For texts" => "للرسائل النصية";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~12 characters
   /// shown through Badge.label
   /// beside: "Unlink…"
@@ -544,6 +556,9 @@ translations ar {
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~12 characters
   /// shown through Badge.label
   label "Synced" => "متزامن";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~21 characters
+  /// shown through RadioGroup.label
+  label "What is it for?" => "لأي غرض هو؟";
   /// AccountSettings · message
   /// placeholders: {facts.AppName} = facts.AppName (string)
   /// shown through Alert.message
@@ -564,12 +579,17 @@ translations ar {
   /// beside: "Your account moves to it when the link in that mail is opened.", "Resend"
   text "Confirmation sent to {address.Pending}" => "أُرسل التأكيد إلى {address.Pending}";
   /// AccountSettings · text on the page
+  /// placeholders: {facts.AppName} = facts.AppName (string)
+  text "For calls. {facts.AppName} sends no texts to your account, so nothing is texted to it." => "للمكالمات. لا يرسل {facts.AppName} رسائل نصية إلى حسابك، لذا لا تُرسَل إليه رسائل نصية.";
+  /// AccountSettings · text on the page
   /// beside: "Off"
   text "Lost every device with a passkey? \"Forgot your password?\" on the sign-in page mails you a link that sets one again." => "فقدت كل جهاز عليه مفتاح مرور؟ رابط \"نسيت كلمة المرور؟\" في صفحة تسجيل الدخول يرسل إليك رابطًا يعيّن واحدة من جديد.";
   /// AccountSettings · text on the page
   text "No number" => "لا يوجد رقم";
   /// AccountSettings · text on the page
   text "No passkeys yet." => "لا توجد مفاتيح مرور بعد.";
+  /// AccountSettings · text on the page
+  text "Nothing is texted to it." => "لا تُرسَل إليه رسائل نصية.";
   /// AccountSettings · text on the page
   text "Signing in asks for a code texted to this number." => "يطلب تسجيل الدخول رمزًا يُرسل إلى هذا الرقم في رسالة نصية.";
   /// AccountSettings · text on the page
@@ -823,8 +843,6 @@ translations ar {
   // ── ChangeAddressFor ──
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
-  /// also in GiveManagedAccountAnAddress
-  /// also in ChangeEmail
   error "Another account already uses that address." => "هذا العنوان مستخدم بالفعل في حساب آخر.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
@@ -973,6 +991,7 @@ translations ar {
   // ── ConfirmStep ──
   /// ConfirmStep · a button's label · at most ~12 characters
   /// shown through Button.label
+  /// also in SettingNumber
   /// also in AccountSettings
   button "Cancel" => "إلغاء";
 
@@ -1022,6 +1041,11 @@ translations ar {
   /// shown through ValidationException
   error "That account already has an address of its own." => "لهذا الحساب عنوان خاص به بالفعل.";
 
+  // ── KeptNumber ──
+  /// KeptNumber · an error message
+  /// shown through ValidationException
+  error "Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67." => "اكتب الرقم مع علامة + ورمز البلد، مثل +46 70 123 45 67، وليس 070 123 45 67.";
+
   // ── LinkProvider ──
   /// LinkProvider · an error message
   /// placeholders: {provider} = provider (string)
@@ -1056,11 +1080,6 @@ translations ar {
   /// shown through ValidationException
   error "Turn two-step sign-in on first." => "فعّل تسجيل الدخول بخطوتين أولًا.";
 
-  // ── NumberThisAccountMayProve ──
-  /// NumberThisAccountMayProve · an error message
-  /// shown through ValidationException
-  error "Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67." => "اكتب الرقم مع علامة + ورمز البلد، مثل +46 70 123 45 67، وليس 070 123 45 67.";
-
   // ── Osysharp.UserAccounts.AddressChangeState ──
   /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~11 characters
   /// shown through Osysharp.UserAccounts.AddressChangeState.Moved
@@ -1093,6 +1112,16 @@ translations ar {
   /// shown through Osysharp.UserAccounts.ManagedAccountState.Making
   /// beside: "Made"
   label "Making the account" => "جارٍ إنشاء الحساب";
+
+  // ── Osysharp.UserAccounts.PhoneUse ──
+  /// Osysharp.UserAccounts.PhoneUse · a label (a field, a list item, a menu entry) · at most ~69 characters
+  /// shown through Osysharp.UserAccounts.PhoneUse.Calls
+  /// beside: "Texts — a mobile. We text it a code to confirm it."
+  label "Calls — any number, a landline too. Never texted." => "المكالمات — أي رقم، حتى الأرضي. لا تُرسَل إليه رسائل نصية.";
+  /// Osysharp.UserAccounts.PhoneUse · a label (a field, a list item, a menu entry) · at most ~70 characters
+  /// shown through Osysharp.UserAccounts.PhoneUse.Texts
+  /// beside: "Calls — any number, a landline too. Never texted."
+  label "Texts — a mobile. We text it a code to confirm it." => "الرسائل النصية — رقم جوال. نرسل إليه رمزًا لتأكيده.";
 
   // ── Osysharp.UserAccounts.RoleToldState ──
   /// Osysharp.UserAccounts.RoleToldState · a label (a field, a list item, a menu entry) · at most ~13 characters
@@ -1136,6 +1165,12 @@ translations ar {
   /// shown through PasskeyLine()
   text "Added {added} · last used {used}" => "أُضيف في {added} · آخر استخدام {used}";
 
+  // ── PhoneForCallsLine ──
+  /// PhoneForCallsLine · text on the page
+  /// placeholders: {Trim} = newPhone.Trim(…) (string)
+  /// shown through PhoneForCallsLine()
+  text "To keep {Trim} for calls, confirm it is you. Nothing is texted to it." => "لحفظ {Trim} للمكالمات، أكّد أنك أنت. لا تُرسَل إليه رسائل نصية.";
+
   // ── ProvePhone ──
   /// ProvePhone · an error message
   /// shown through ValidationException
@@ -1143,8 +1178,12 @@ translations ar {
   /// ProvePhone · an error message
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
   /// shown through ValidationException
-  /// also in NumberThisAccountMayProve
+  /// also in KeptNumber
   error "{AccountsAppName} does not keep phone numbers." => "لا يحتفظ {AccountsAppName} بأرقام الهواتف.";
+  /// ProvePhone · an error message
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through ValidationException
+  error "{AccountsAppName} does not send texts to your account — add the number for calls instead." => "لا يرسل {AccountsAppName} رسائل نصية إلى حسابك — أضف الرقم للمكالمات بدلًا من ذلك.";
 
   // ── ProvenOwner ──
   /// ProvenOwner · an error message
@@ -1326,7 +1365,7 @@ translations ar {
   // ── SetSmsSecondStep ──
   /// SetSmsSecondStep · an error message
   /// shown through ValidationException
-  error "Add and confirm a phone number first." => "أضف رقم هاتف وأكّده أولًا.";
+  error "Add a number for texts and confirm it first." => "أضف رقمًا للرسائل النصية وأكّده أولًا.";
   /// SetSmsSecondStep · an error message
   /// shown through ValidationException
   error "Two-step sign-in with an authenticator app is on — that is already a stronger second step." => "تسجيل الدخول بخطوتين عبر تطبيق المصادقة مفعّل، وهو بالفعل خطوة ثانية أقوى.";
@@ -1529,6 +1568,11 @@ translations ar {
   /// SignUpScreen · a heading
   /// shown through AccountsFrame.heading
   heading "Create an account" => "إنشاء حساب";
+
+  // ── TextCode ──
+  /// TextCode · an error message
+  /// shown through Exception
+  error "A code is texted only to a number confirmed for texts — this one is not, so nothing was sent." => "لا تُرسَل الرموز إلا إلى رقم مؤكَّد للرسائل النصية — وهذا الرقم ليس كذلك، لذا لم يُرسَل شيء.";
 
   // ── UnlinkProvider ──
   /// UnlinkProvider · an error message

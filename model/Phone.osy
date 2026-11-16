@@ -1,24 +1,44 @@
-// A phone number on an account: proven by a texted code, then — when the app offers it — a way to
-// sign in with a texted code, or an account's own choice of second step. Texts go through Osysharp.Sms, so an app with no
-// text-message sender yet still works: the codes wait in the outbox.
+// A phone number on an account, FOR one of two things (owner, 15 Nov: "to contact a person, any number is fine; to send
+// information as text, it needs to be a cell number"):
+//   • CALLS — any number, a landline too. Recorded once the person confirms it is them; no code, and NOTHING IS EVER
+//     TEXTED TO IT: it signs nobody in, is nobody's second step, and costs the app nothing.
+//   • TEXTS — a mobile, proven by a six-digit code texted to it: it is a number for texts only once that code came back.
+//     Then — when the app offers it — a way to sign in with a texted code, or an account's own choice of second step, and
+//     where the app texts the account (`NumberToText`).
+// Stored as `User.Phone` with `PhoneVerifiedAt` set for a number for texts (its code came back), and null for a number for
+// calls — so every number recorded before purposes existed (each proven by its code) is a number for texts, as it was.
+// Texts go through Osysharp.Sms, so an app with no text-message sender yet still works: the codes wait in the outbox.
 //
-// ⚑ THE APP DECIDES WHAT A NUMBER IS FOR (`AccountsSetup.ProvePhones`, `SmsSignIn`, `SmsSecondStep`), all off by default:
-//   a texted code is cheap for an attacker who has taken over a number (a SIM swap, a port-out), so a number never signs
-//   anybody in unless the app chose that. And it is NEVER the second factor an app can REQUIRE — `SecondFactor.Required`
-//   always means an authenticator app (SECURITY-INVARIANT accounts-sms-is-not-a-required-second-factor, SignIn.osy).
+// ⚑ THE APP DECIDES WHAT A NUMBER FOR TEXTS IS FOR (`AccountsSetup.ProvePhones`, `SmsSignIn`, `SmsSecondStep`), all off by
+//   default: a texted code is cheap for an attacker who has taken over a number (a SIM swap, a port-out), so a number never
+//   signs anybody in unless the app chose that. And it is NEVER the second factor an app can REQUIRE —
+//   `SecondFactor.Required` always means an authenticator app (SECURITY-INVARIANT accounts-sms-is-not-a-required-second-factor, SignIn.osy).
+//
+// ⚑ "MUST BE A MOBILE" IS CHECKED BY THE CODE. A number that cannot receive a text cannot send the code back; there is no
+//   table of mobile ranges to get wrong (numbers move between operators, and every country draws its ranges its own way).
 
 namespace Osysharp.UserAccounts;
 
 using Osysharp.Identity;
 using Osysharp.Sms;
 
-/// Add, change or remove the account's phone number, given its address and password. With a `phone` and no `code`, a
-/// code is texted to it and this answers "sent"; with the code, the number is recorded as proven and this answers "".
-/// With two-step sign-in on, recording a number also takes a current code from the authenticator (`twoStepCode`). An
-/// empty `phone` removes the number — refused while it is the account's second step (turn that off first). Throws the
-/// sentence to show.
+/// Add, change or remove the account's phone number, given its address and password — and say what it is for.
+///
+/// For texts (`forTexts`, the default): with a `phone` and no `code`, a code is texted to it and this answers "sent"; with
+/// the code, the number is recorded as the account's number for texts and this answers "". With two-step sign-in on,
+/// recording it also takes a current code from the authenticator (`twoStepCode`). Only an account the app offers texts to
+/// (`AccountsSetup.Phone.ForTexts`) may; until the code comes back, the account's number — and what it is for — is what
+/// it was, so a number for calls being moved to texts is still not texted anything but its code.
+///
+/// For calls (`forTexts: false`): any number, a landline too — recorded at once, nothing texted, answers "". Any account
+/// may, whenever the app keeps numbers. With two-step sign-in on, it takes the authenticator's code as well. A number for
+/// texts made a number for calls is never texted again.
+///
+/// An empty `phone` removes the number. Changing or removing it is refused while it is the account's texted second step
+/// (turn that off first). Throws the sentence to show.
 [AuthMethod]
-public string ProvePhone(string email, string password, string phone, string code = "", string twoStepCode = "") {
+public string ProvePhone(string email, string password, string phone, string code = "", string twoStepCode = "",
+                         bool forTexts = true) {
   var setup = App.Setting<AccountsSetup>();
   if (!PhonesOffered()) { throw new ValidationException($"{AccountsAppName()} does not keep phone numbers."); }
   var account = Verified(email, password);
@@ -33,6 +53,24 @@ public string ProvePhone(string email, string password, string phone, string cod
     }
     return "";
   }
+  if (!forTexts) {
+    var number = KeptNumber(phone);
+    if (account.SmsSecondStep) { throw new ValidationException("Turn off text-message sign-in codes first — this number is your second step."); }
+    if (account.TotpSecret != null) { RequireCode(account, twoStepCode); }
+    if (account.Phone == number && account.PhoneVerifiedAt == null) { return ""; }
+    // Nothing is texted: a number for calls is recorded as it stands, and from now on nothing texts it (`NumberToText`).
+    account.Phone = number;
+    account.PhoneVerifiedAt = null;
+    SendRendered(account.Email, setup.Mails.PhoneChanged(account, number, true));
+    return "";
+  }
+  // SECURITY-INVARIANT(accounts-a-phone-is-added-only-where-the-app-offers-one): a number FOR TEXTS is added on the account
+  // page only for an account the app's `AccountsSetup.Phone.ForTexts` offers texts to — every one costs a text; a number
+  // for calls costs none and any account may keep one. Guarded by tests/sms.test.osy
+  // (an_account_the_app_offers_no_phone_cannot_add_one_but_may_remove_its_own).
+  if (!setup.Phone.ForTexts(account)) {
+    throw new ValidationException($"{AccountsAppName()} does not send texts to your account — add the number for calls instead.");
+  }
   if (code.Trim() == "") {
     TextPhoneCode(account, phone);
     return "sent";
@@ -45,20 +83,20 @@ public string ProvePhone(string email, string password, string phone, string cod
 /// Text `account` a code that proves `phone`, and answer the number as the kit keeps it (E.164) — for an app's own door:
 /// an `[AuthMethod]` that has established who this is in its own way (a provider's sealed sign-in, an application it is
 /// completing) and must prove a number for that account, where `ProvePhone` would ask for a password the account may not
-/// have. Texted at most once a minute and five times an hour, like every code. Throws the sentence to show for a number
+/// have. Texted within the same limits as every code (`TextCode`). Throws the sentence to show for a number
 /// with no country code. A number other accounts have proven too is fine — one phone may serve several accounts.
 public string TextPhoneCode(User account, string phone) {
-  var number = NumberThisAccountMayProve(account, phone);
+  var number = KeptNumber(phone);
   TextCode(account, CodePurpose.ProvePhone, number);
   return number;
 }
 
-/// Record `phone` as `account`'s, proven by the `code` that `TextPhoneCode` (or `ProvePhone`) texted to it — the other half
+/// Record `phone` as `account`'s number for texts, proven by the `code` that `TextPhoneCode` (or `ProvePhone`) texted to it — the other half
 /// of an app's own door. A wrong or spent code is a wrong try against the account, kept, and the sentence thrown; a right
 /// one records the number and tells the account's address. Only a code texted for THIS account proves it: a code texted
 /// to the same number for another account is not one of this account's codes.
 public void ProvePhoneCode(User account, string phone, string code) {
-  var number = NumberThisAccountMayProve(account, phone);
+  var number = KeptNumber(phone);
   var match = CodeMatching(LiveCodesOf(account, CodePurpose.ProvePhone, number), code);
   if (match == null) {
     UnitOfWork.Commit();   // the miss is kept: the throw below would discard it
@@ -70,13 +108,14 @@ public void ProvePhoneCode(User account, string phone, string code) {
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PhoneChanged(account, number, true));
 }
 
-/// `phone` as the kit keeps it, when the app keeps numbers.
+/// `phone` as the kit keeps it (E.164), for a number of either purpose, when the app keeps numbers — or the sentence to
+/// show, thrown.
 ///
 /// ⚑ A NUMBER MAY BE PROVEN BY SEVERAL ACCOUNTS — people may keep more than one. Each proves
 ///   it with a code texted for that account alone (`LiveCodesOf` reads only the account's own codes), so proving it for
 ///   one account says nothing about another, and its second step and contact use are each account's own. Where a number
 ///   IDENTIFIES an account — signing in by text — a shared one identifies nobody (`SignInWithPhone`).
-string NumberThisAccountMayProve(User account, string phone) {
+string KeptNumber(string phone) {
   if (!PhonesOffered()) { throw new ValidationException($"{AccountsAppName()} does not keep phone numbers."); }
   var number = NormalisedPhone(phone);
   if (number == "") {
@@ -85,21 +124,40 @@ string NumberThisAccountMayProve(User account, string phone) {
   return number;
 }
 
-/// The accounts a texted code to `number` could sign in: active, the number proven, and not one whose second step is this
-/// very phone (one phone is one factor).
+/// Obsolete since 1.7.0 — use `KeptNumber(phone)`; the account plays no part in keeping a number. Kept so code written
+/// against 1.5 still compiles, and answers what that did: `phone` as the kit keeps it, or the sentence to show, thrown.
+string NumberThisAccountMayProve(User account, string phone) { return KeptNumber(phone); }
+
+/// Where `account` may be texted: its number when that is a number for texts whose code came back — else "". The ONE
+/// answer to "may this account be texted, and where": every text the kit sends an account (a sign-in code, a texted
+/// second step, "use your password") takes its number from here, and an app texting its people (an alert to staff)
+/// should too. A number for calls answers "".
+///
+/// SECURITY-INVARIANT(accounts-only-a-confirmed-number-for-texts-is-texted): nothing is texted to an account's number
+/// unless it is a number for texts whose code came back. Every reader that texts an account goes through this, and
+/// `TextCode` refuses any code but the confirming one to a number this does not answer. The confirming code is the one
+/// text an unconfirmed number gets — only when its own account asks to use it for texts, within `TextCode`'s limits.
+/// Guarded by tests/sms.test.osy (a_texts_number_is_used_only_after_its_code_is_confirmed — red with this check removed).
+public string NumberToText(User account) {
+  if (account.Phone == null || account.PhoneVerifiedAt == null) { return ""; }
+  return account.Phone;
+}
+
+/// The accounts a texted code to `number` could sign in: active, the number theirs for texts (`NumberToText`), and not one
+/// whose second step is this very phone (one phone is one factor). A number for calls signs nobody in.
 [SuppressWarning("cost-unbounded-read")]   // the accounts behind one phone number — a handful at most
 List<User> SignInHoldersOf(string number) {
   if (number == "") { return new List<User>(); }
-  return User.Where(u => u.Phone == number && u.PhoneVerifiedAt != null && u.IsActive).ToList()
-    .Where(u => !TextedSecondStep(u)).ToList();
+  return User.Where(u => u.Phone == number && u.IsActive).ToList()
+    .Where(u => NumberToText(u) == number && !TextedSecondStep(u)).ToList();
 }
 
 /// An account behind `number` whose second step is that phone, or null.
 [SuppressWarning("cost-unbounded-read")]   // the accounts behind one phone number — a handful at most
 User? SecondStepHolderOf(string number) {
   if (number == "") { return null; }
-  return User.Where(u => u.Phone == number && u.PhoneVerifiedAt != null && u.IsActive).ToList()
-    .Where(u => TextedSecondStep(u)).FirstOrDefault();
+  return User.Where(u => u.Phone == number && u.IsActive).ToList()
+    .Where(u => NumberToText(u) == number && TextedSecondStep(u)).FirstOrDefault();
 }
 
 /// Text `text` to `number` unless it was already texted there in the last hour — the same bound on a stranger's phone as
@@ -163,7 +221,7 @@ public string SetSmsSecondStep(string email, string password, bool on, string co
   if (!setup.SmsSecondStep) { throw new ValidationException($"{AccountsAppName()} does not offer text-message sign-in codes."); }
   var account = Verified(email, password);
   if (on) {
-    if (account.Phone == null || account.PhoneVerifiedAt == null) { throw new ValidationException("Add and confirm a phone number first."); }
+    if (NumberToText(account) == "") { throw new ValidationException("Add a number for texts and confirm it first."); }
     if (account.TotpSecret != null) {
       throw new ValidationException("Two-step sign-in with an authenticator app is on — that is already a stronger second step.");
     }
@@ -175,10 +233,10 @@ public string SetSmsSecondStep(string email, string password, bool on, string co
   }
   if (!account.SmsSecondStep) { return ""; }
   if (code.Trim() == "") {
-    TextCode(account, CodePurpose.SecondStepOff, account.Phone!);
+    TextCode(account, CodePurpose.SecondStepOff, NumberToText(account));
     return "sent";
   }
-  var match = CodeMatching(LiveCodesOf(account, CodePurpose.SecondStepOff, account.Phone!), code);
+  var match = CodeMatching(LiveCodesOf(account, CodePurpose.SecondStepOff, NumberToText(account)), code);
   if (match == null) {
     UnitOfWork.Commit();
     throw new ValidationException(WrongCode());
@@ -194,15 +252,31 @@ public bool PhonesOffered() {
   return setup.ProvePhones || setup.SmsSignIn || setup.SmsSecondStep;
 }
 
+/// What a phone number on an account is for — the account page's choice. Not stored: a number for texts is one whose
+/// code came back (`NumberToText`).
+public enum PhoneUse {
+  [Label("Calls — any number, a landline too. Never texted.")] Calls,
+  [Label("Texts — a mobile. We text it a code to confirm it.")] Texts,
+}
+
 /// What the account page shows about the signed-in account's phone. Runs as the account itself.
 public class PhoneFacts {
   public string Number = "";
+  /// The number is for texts and its code came back — the only kind anything is texted to. False: a number for calls.
   public bool Proven = false;
   public bool SecondStep = false;
+  /// The account may add (or change to) a number here — one for calls, whenever the app keeps numbers.
+  public bool MayAdd = false;
+  /// …and one for texts — the app's `AccountsSetup.Phone.ForTexts` offers it texts.
+  public bool MayText = false;
 }
 
 public PhoneFacts MyPhone() {
   var me = Me();
-  if (me == null || me.Phone == null) { return new PhoneFacts(); }
-  return new PhoneFacts { Number = me.Phone, Proven = me.PhoneVerifiedAt != null, SecondStep = me.SmsSecondStep };
+  if (me == null) { return new PhoneFacts(); }
+  var mayAdd = PhonesOffered();
+  var mayText = mayAdd && App.Setting<AccountsSetup>().Phone.ForTexts(me);
+  if (me.Phone == null) { return new PhoneFacts { MayAdd = mayAdd, MayText = mayText }; }
+  return new PhoneFacts { Number = me.Phone, Proven = NumberToText(me) != "", SecondStep = me.SmsSecondStep, MayAdd = mayAdd,
+                          MayText = mayText };
 }

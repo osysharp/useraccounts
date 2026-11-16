@@ -63,6 +63,21 @@ void a_second_code_within_the_minute_is_not_sent() {
   Assert.Equal(1, DoorMailsTo("newcomer@desk.test"));              // …and no second mail to fill the inbox with
 }
 
+// …and five an hour and twenty a day, answered the same step every time. SECURITY-INVARIANT(accounts-mail-to-an-address-is-rate-limited).
+[Test(DoorDesk)]
+void a_door_code_is_mailed_five_times_an_hour_and_twenty_a_day() {
+  for (var hour = 1; hour <= 5; hour++) {
+    for (var i = 1; i <= 6; i++) {
+      SignInStep step = new SignInStep();
+      runas (AuthBootstrap) { step = MailDoorCode("ada@desk.test"); }
+      Assert.True(step.MustVerify);
+      TestClock.Advance(TimeSpan.FromMinutes(2));
+    }
+    Assert.Equal(hour <= 4 ? 5 * hour : 20, DoorMailsTo("ada@desk.test"));
+    TestClock.Advance(TimeSpan.FromMinutes(50));
+  }
+}
+
 // ── the code proves the address, and only the right one ─────────────────────────────────────────────────────────
 
 [Test(DoorDesk)]

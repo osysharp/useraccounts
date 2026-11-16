@@ -127,16 +127,37 @@ string IssueCode(User account, CodeChannel channel, CodePurpose purpose, string 
 }
 
 /// Text a fresh code to `phone` for `purpose` (the message is `AccountsSetup.Texts`'). Outside a sign-in's own second step,
-/// an account is texted a code for the same thing at most once a minute and five times an hour, so nobody can run up the
-/// app's bill — or a stranger's phone — from the page.
+/// an account is texted a code for the same thing at most once a minute and five times an hour, and ten codes a day in
+/// all; and a number is texted at most ten codes a day that prove it, whichever accounts ask — so nobody can run up the
+/// app's bill, or a stranger's phone, from the page, however many accounts they make. Past a limit nothing is texted and
+/// the caller is answered as for any other text.
+///
+/// SECURITY-INVARIANT(accounts-texts-to-a-number-are-rate-limited): outside a sign-in's own second step (whose challenge
+/// the password already paid for), no account is texted more than `TextsADay()` codes a day, and no number more than
+/// `ProvingTextsToANumberADay()` codes that prove it. Guarded by tests/sms.test.osy
+/// (a_number_is_texted_ten_proving_codes_a_day_however_many_accounts_ask, an_account_is_texted_ten_codes_a_day).
+///
+/// SECURITY-INVARIANT(accounts-only-a-confirmed-number-for-texts-is-texted): a code for anything but confirming a number
+/// goes only to the account's number for texts whose code came back (`NumberToText`, Phone.osy) — never to a number for
+/// calls, nor to one still waiting for its code. Asked here, where every code is texted, so no caller can forget it.
+/// Guarded by tests/sms.test.osy (a_texts_number_is_used_only_after_its_code_is_confirmed).
 void TextCode(User account, CodePurpose purpose, string phone, SignInChallenge? challenge = null) {
+  if (purpose != CodePurpose.ProvePhone && (phone == "" || phone != NumberToText(account))) {
+    throw new Exception("A code is texted only to a number confirmed for texts — this one is not, so nothing was sent.");
+  }
   var now = DateTime.UtcNow;
   if (challenge == null) {
-    // Once a minute, and five an hour: codes made in the last minute lapse after `aMinuteAgo`, the last hour's after `anHourAgo`.
+    // A code made at `t` lapses at `t + CodeLifetime()`, so the codes made since `since` are those lapsing after `since + CodeLifetime()`.
     var aMinuteAgo = now + CodeLifetime() - TimeSpan.FromMinutes(1);
     var anHourAgo = now + CodeLifetime() - TimeSpan.FromHours(1);
+    var aDayAgo = now + CodeLifetime() - TimeSpan.FromDays(1);
     if (OneTimeCode.Any(c => c.Account == account && c.Purpose == purpose && c.Destination == phone && c.ExpiresAt > aMinuteAgo)) { return; }
     if (OneTimeCode.Count(c => c.Account == account && c.Purpose == purpose && c.ExpiresAt > anHourAgo) >= 5) { return; }
+    if (OneTimeCode.Count(c => c.Account == account && c.Channel == CodeChannel.Sms && c.Challenge == null && c.ExpiresAt > aDayAgo)
+        >= TextsADay()) { return; }
+    if (purpose == CodePurpose.ProvePhone
+        && OneTimeCode.Count(c => c.Purpose == CodePurpose.ProvePhone && c.Destination == phone && c.ExpiresAt > aDayAgo)
+           >= ProvingTextsToANumberADay()) { return; }
   }
   var code = IssueCode(account, CodeChannel.Sms, purpose, phone, challenge: challenge);
   SendSms(new SmsMessage { To = phone, Text = App.Setting<AccountsSetup>().Texts.Code(account, code, purpose) },

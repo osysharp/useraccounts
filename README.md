@@ -54,9 +54,22 @@ Every colour, face and size on these pages is a theme token, so the app's own th
   which addresses have accounts.
 - **A reset link** is a mailed secret, stored only as a hash, that works once and for one hour. Pressing the button
   twice mails once; using one link spends the others.
+- **Nobody can fill an inbox from your pages.** A reset link is mailed to an account at most once a minute, 5 times an
+  hour and 20 times a day; a link that proves an address (a new verification, a move's confirmation) at most once a
+  minute to one address, 5 times an hour and 20 a day from one account, and 5 an hour and 20 a day to one address
+  whichever accounts ask. Past a limit the request is answered exactly as any other and nothing is sent — so the limit
+  says nothing about who has an account.
+  The trade-off, plainly: because the limits are counted per account and per address, a stranger can spend them. Anybody,
+  signed out, can ask for an account's reset link until its limit is used up (5 an hour, 20 a day), and somebody with
+  throwaway accounts can use up an address's checks by asking to move to it — the owner's own reset or verification
+  mail then waits until the hour or the day has passed. Nothing is taken over and nothing is said to the stranger; the
+  limits choose a delayed mail for one person over an inbox anybody can fill.
 - **An address is proven by a message it received.** A change of address a person asks for takes effect only from a
   link sent to the NEW address, and the OLD address is told. Nothing else writes the address — not the account, not
-  your staff, not a page or an API call (`deny update Email except via ConfirmAddressChange` on `User`).
+  your staff, not a page or an API call (`deny update Email except via ConfirmAddressChange` on `User`). Asking to move
+  to an address another account already uses is answered exactly as a free one (the old address is told, the move shows
+  as pending) — but the taken address is mailed nothing and the account never moves there, so the page never says which
+  addresses have accounts.
 - **The old address can call a move off.** Its mail carries a single-use "This wasn't me — cancel the change" link
   (`/cancel-address-change/{token}`): no password, because whoever asked has it. The new address's link and code then
   confirm nothing, and every browser signed in to the account is signed out. The account page's pending-address row
@@ -75,6 +88,13 @@ Every colour, face and size on these pages is a theme token, so the app's own th
   the outbox's copies of that mail — and keeps the row, which work it did still names.
 - **One address, one account**, across every kind of account. A phone number may be proven by several accounts (one
   person, more than one account), each with its own code — and a number shared that way **signs in nobody by text**.
+- **Texts are bounded too.** Outside a sign-in's own second step, an account is texted a code for one purpose at most
+  once a minute and 5 times an hour, and 10 codes a day in all; one number is texted at most 10 codes a day that prove
+  it, however many accounts ask. Which accounts may keep a number for texts is yours to say (`AccountsSetup.Phone`).
+- **A phone number says what it is for.** For **calls** — any number, a landline too — it is recorded once the person
+  confirms it is them, with no code, and nothing is ever texted to it. For **texts** it must be a mobile: a code is
+  texted to it, and only once that code comes back is it ever texted anything (`NumberToText` is the one answer to
+  where an account may be texted — use it for your own texts too).
 - **Sign-up gives only the roles the app chose** (`SignupRole`, and `FirstAccountRole` for the very first account),
   never one the visitor names. `SignupOpen = false` closes it.
 - **Changing the password needs the current one**, and the account is told by mail.
@@ -127,6 +147,8 @@ app.Accounts = new AccountsSetup {
   Kinds = new AccountKinds(), // derive to make your own kind of account on sign-up
   SecondFactor = new SecondFactorPolicy(),   // derive to say who must use two-step sign-in
   AddressProof = new AddressProofPolicy(),   // derive to say whose address must be proven before a first sign-in
+  ProvePhones = false,        // accounts keep a phone: for calls (any number, never texted) or for texts (proven by a texted code; SmsSignIn / SmsSecondStep turn it on too)
+  Phone = new PhonePolicy(),  // derive (`ForTexts`) to say which accounts may keep a number for texts — every account by default
   LogoUrl = "",               // the app's mark on every sign-in screen: File.Url("public/brand/logo.svg"), or https
   Marks = new ProviderMarks(), // derive to give a sign-in provider's buttons its own mark (GitHub, Google, Microsoft are built in)
 };
@@ -152,7 +174,9 @@ manager. An app with more than one role usually adds it: `use Osysharp.UserManag
 A child a parent books for, a walk-in at the desk: `MakeManagedAccount("Sam")` makes a real account with no password and
 no address anybody can mail, recorded with who made it and who looks after it. Who may is the app's to say:
 `policy MakesManagedAccounts => IsMember;`. Later, `GiveManagedAccountAnAddress(account, "sam@example.com")` sends a
-link; the account moves there once it is opened, and Sam chooses a password like anybody else.
+link; the account moves there once it is opened, and Sam chooses a password like anybody else. The link is held to the
+same limits as any address check, and an address another account uses is answered exactly as a free one — it is mailed
+nothing and the account never moves there.
 
 ## Your own kind of account
 

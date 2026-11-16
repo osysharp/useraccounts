@@ -49,6 +49,10 @@ public class SignInStep {
   /// A provider sign-in for an account the app's own door has not finished with (`AccountsSetup.OwnDoor`): no ticket,
   /// and the provider page shows the app's door again, with the same sealed token, for `Account`.
   public bool OwnDoor = false;
+  /// What the step is about, for the person to read — an app's own door names it ("Northwind Health", the organisation an
+  /// invitation creates). Set only by an app's own `[AuthMethod]`; the kit's own steps leave it empty. Answered only to
+  /// somebody who holds the link or has proven the first step, so a wrong token learns nothing from it.
+  public string Subject = "";
 }
 
 /// What setting up two-step sign-in shows, once: the key to type into an authenticator app, and the QR code that
@@ -89,7 +93,13 @@ public entity SignInChallenge {
   /// Made for setting two-step sign-in up (`SignInStep.Enrolment`), not for a code: `SignInWithCode` refuses it, and
   /// `EnableSecondFactor` accepts nothing else in place of the password.
   bool ForEnrolment = false;
-  security { allow read, create, update when IsAuthenticator; }
+  security {
+    allow read, create, update when IsAuthenticator;
+    // A second factor's reset spends every open challenge.
+    allow read when ResetsSecondFactor;
+    allow update UsedAt when ResetsSecondFactor;
+    deny read TokenHash when !IsAuthenticator;
+  }
 }
 
 /// One of an account's one-time recovery codes. Only a keyed fingerprint is kept (`Security.Fingerprint`), so the table
@@ -106,6 +116,9 @@ public entity RecoveryCode {
     allow read when IsAuthenticated || IsAuthenticator where Account == user;
     allow read when IsAuthenticator;
     allow create, update when IsAuthenticator;
+    // A second factor's reset spends the codes left — it reads which are unspent, never what they were.
+    allow read when ResetsSecondFactor;
+    allow update UsedAt when ResetsSecondFactor;
     deny read CodeHash when !IsAuthenticator;
   }
 }

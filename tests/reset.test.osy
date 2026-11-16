@@ -97,3 +97,29 @@ void a_reset_proves_the_address_it_was_mailed_to() {
   runas (AuthBootstrap) { ResetPassword(token, "a-whole-new-one"); }
   runas (AuthBootstrap) { Assert.NotNull(User.Single(u => u.Email == "unproven@desk.test").EmailVerifiedAt); }
 }
+
+// ⭐ A RESET LINK IS MAILED A BOUNDED NUMBER OF TIMES: once a minute, five an hour and twenty a day to an account (its
+// address) — and the button is answered "" every time, as it is for an address with no account, so the limit says
+// nothing about who has one. SECURITY-INVARIANT(accounts-mail-to-an-address-is-rate-limited).
+[Test(Resets)]
+void the_sixth_reset_in_an_hour_and_the_twenty_first_in_a_day_mail_nothing() {
+  for (var i = 1; i <= 6; i++) {
+    string answer = "x";
+    runas (AuthBootstrap) { answer = RequestPasswordReset("ada@desk.test"); }
+    Assert.Equal("", answer);
+    TestClock.Advance(TimeSpan.FromMinutes(2));
+  }
+  runas (AuthBootstrap) { Assert.Equal(5, MailsTo("ada@desk.test", "Choose a new password")); }
+  // Five more in each of the next three hours makes twenty; the hour after, the day's twenty-first is refused too.
+  for (var hour = 1; hour <= 4; hour++) {
+    TestClock.Advance(TimeSpan.FromMinutes(61));
+    for (var i = 1; i <= 5; i++) {
+      runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+      TestClock.Advance(TimeSpan.FromMinutes(2));
+    }
+  }
+  runas (AuthBootstrap) { Assert.Equal(20, MailsTo("ada@desk.test", "Choose a new password")); }
+  string unknown = "x";
+  runas (AuthBootstrap) { unknown = RequestPasswordReset("nobody@desk.test"); }
+  Assert.Equal("", unknown);
+}

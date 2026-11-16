@@ -108,3 +108,36 @@ void erasing_the_person_erases_the_name_their_record_kept() {
     Assert.Equal("(erased)", ManagedAccountRequest.Single().Name);
   }
 }
+
+/// The managed account Mo made for `name`.
+User ManagedOf(string name) {
+  User? made = null;
+  runas (Mo) { MakeManagedAccount(name); }
+  runas (AuthBootstrap) { made = ManagedAccountRequest.Single(r => r.Name == name).Account!; }
+  return made!;
+}
+
+[Test(Household)]
+void giving_an_address_is_mailed_within_the_limits_and_a_taken_address_is_answered_as_a_free_one() {
+  // An address another account uses is answered exactly as a free one — no "taken" — and is mailed nothing; the account
+  // never moves there.
+  var sam = ManagedOf("Sam");
+  runas (Mo) { GiveManagedAccountAnAddress(sam, "lu@desk.test"); }
+  runas (AuthBootstrap) {
+    Assert.Equal(0, MailsTo("lu@desk.test", ""));
+    Assert.Equal(1, ManagedAccountAddress.Count(a => a.Address == "lu@desk.test"));
+    Assert.True(IsManaged(User.Single(u => u.DisplayName == "Sam")));
+  }
+  // Pressing it twice within a minute mails once.
+  TestClock.Advance(TimeSpan.FromMinutes(2));
+  runas (Mo) { GiveManagedAccountAnAddress(sam, "sam@desk.test"); }
+  runas (Mo) { GiveManagedAccountAnAddress(sam, "sam@desk.test"); }
+  runas (AuthBootstrap) { Assert.Equal(1, MailsTo("sam@desk.test", "")); }
+  // Many managed accounts given one stranger's address: five mails an hour, however many accounts ask.
+  for (var i = 0; i < 7; i++) {
+    TestClock.Advance(TimeSpan.FromMinutes(2));
+    var kid = ManagedOf($"Kid {i}");
+    runas (Mo) { GiveManagedAccountAnAddress(kid, "stranger@else.test"); }
+  }
+  runas (AuthBootstrap) { Assert.Equal(5, MailsTo("stranger@else.test", "")); }
+}

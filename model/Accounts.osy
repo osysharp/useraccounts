@@ -20,12 +20,13 @@ public entity User : Principal {
   long TotpLastStep = -1;
   /// When two-step sign-in was turned on — null while it is off. The account's owner reads it (the account page).
   DateTime? SecondFactorOnAt;
-  /// The account's phone number, E.164 — set by the sign-in flow alone, once a texted code proved it (`ProvePhone`).
-  /// NOT unique: one person may keep several accounts behind one phone, and each proves the number
+  /// The account's phone number, E.164 — set by the sign-in flow alone (`ProvePhone`): a number for texts once a texted
+  /// code proved it, a number for calls once the person confirmed it is them (Phone.osy). NOT unique: one person may keep several accounts behind one phone, and each proves the number
   /// with a code of its own. A number SHARED that way identifies none of them, so it signs nobody in by itself
   /// (SECURITY-INVARIANT accounts-a-shared-number-signs-in-no-one-by-itself, Phone.osy).
   [MaxLength(20)] string? Phone;
-  /// When the number was proven — null for none.
+  /// When the number's texted code came back — set only for a number FOR TEXTS, the one kind anything is texted to
+  /// (`NumberToText`); null for a number for calls, or none.
   DateTime? PhoneVerifiedAt;
   /// The account chose a texted code as its second step (`SetSmsSecondStep`) — never the factor an app can require.
   bool SmsSecondStep = false;
@@ -38,9 +39,17 @@ public entity User : Principal {
   // ⚠ This block is the floor every type derived from `User` stands on — one rule per kind of caller, derived exactly.
   security {
     allow read when IsAuthenticated || IsAuthenticator;
-    allow create when IsAuthenticator;
+    allow create when IsAuthenticator || MakesAccounts;
     allow update when IsAuthenticated || IsAuthenticator where Id == user.Id;
     allow update when IsAuthenticator;
+    // An administrator's reset of a lost second factor (`ClearSecondFactor`, run by a kit's recorded change) clears the
+    // second-step columns, and no other.
+    allow update TotpSecret, TotpLastStep, SecondFactorOnAt, SmsSecondStep when ResetsSecondFactor;
+    // `Osysharp.Identity` asks the same two questions of every account, and says which of its columns each writes
+    // (`IsActive`; the API key slots). Here they open a `User`'s row to it — and `Principal` still caps every column.
+    // Entity-wide because a subtype names no inherited column in an `allow`: every column `User` declares itself is
+    // denied to both below, and a type an app derives from `User` narrows its own with its own rules.
+    allow update when DeactivatesAccounts || KeepsApiKeys;
     // SECURITY-INVARIANT(accounts-hash-is-the-sign-in-flows-alone): nobody but the sign-in flow reads the hash or
     // writes it — not the account itself, not an app's staff, not an app's subtype of `User` (the package floor
     // carries both denies to every subtype). The `when` is not optional: an unconditional deny drops the column from
@@ -55,15 +64,17 @@ public entity User : Principal {
     // future code), or clear it, or set one of its own. Stored sealed besides, so a backup or an operator's query is
     // not a factor either. Guarded by tests/second-factor.test.osy.
     deny read TotpSecret when !IsAuthenticator;
-    deny update TotpSecret when !IsAuthenticator;
-    deny update TotpLastStep when !IsAuthenticator;
-    deny update SecondFactorOnAt when !IsAuthenticator;
-    // SECURITY-INVARIANT(accounts-phone-is-proven-by-a-code): a phone number is written by the sign-in flow alone, after a
-    // code texted to it came back — so no account can claim a number it does not hold, and with it the sign-ins and the
-    // second step that number carries. And another account's number is nobody's to read. Guarded by tests/sms.test.osy.
+    deny update TotpSecret when !IsAuthenticator && !ResetsSecondFactor;
+    deny update TotpLastStep when !IsAuthenticator && !ResetsSecondFactor;
+    deny update SecondFactorOnAt when !IsAuthenticator && !ResetsSecondFactor;
+    // SECURITY-INVARIANT(accounts-phone-is-proven-by-a-code): a phone number is written by the sign-in flow alone — a number
+    // for texts after a code texted to it came back, so no account can claim a number it does not hold, and with it the
+    // sign-ins and the second step that number carries; a number for calls carries neither and is never texted
+    // (accounts-only-a-confirmed-number-for-texts-is-texted). And another account's number is nobody's to read.
+    // Guarded by tests/sms.test.osy (an_account_cannot_write_its_own_number_and_nobody_reads_anothers).
     deny update Phone when !IsAuthenticator;
     deny update PhoneVerifiedAt when !IsAuthenticator;
-    deny update SmsSecondStep when !IsAuthenticator;
+    deny update SmsSecondStep when !IsAuthenticator && !ResetsSecondFactor;
     deny read Phone when !IsAuthenticator where Id != user.Id;
     // SECURITY-INVARIANT(accounts-an-address-moves-only-when-the-new-one-confirms): the address that signs in — and that a
     // reset link goes to — changes only once the NEW address has confirmed it (`ConfirmAddressChange`, SignIn.osy),
@@ -75,6 +86,25 @@ public entity User : Principal {
     deny update Email except via ConfirmAddressChange, MoveAccountForTheDesk, ForgetAccountAddress;
   }
 }
+
+/// Who makes an account besides the sign-in flow: nobody, until the app says so — or a kit that uses this one, for its
+/// own actor alone (`policy MakesAccounts += user == Actor.Of<InvitationRun>();` — an invitation's newcomer). It lets an
+/// account be made; reading its credential, or editing another's, stays the sign-in flow's.
+[Extensible] virtual policy MakesAccounts => false;
+
+/// Who switches a `User` off and on besides the sign-in flow — `Osysharp.Identity`'s question of the same name, asked of
+/// this kit's accounts: nobody, until the app says so — or a kit that uses this one, for its own actor alone.
+[Extensible] virtual policy DeactivatesAccounts => false;
+
+/// Who puts an API key on a `User` and takes it off besides the sign-in flow — `Osysharp.Identity`'s question of the
+/// same name, asked of this kit's accounts: nobody, until the app says so — or a kit that uses this one, for its own
+/// actor alone.
+[Extensible] virtual policy KeepsApiKeys => false;
+
+/// Who clears an account's second step besides the sign-in flow — an administrator's reset of a lost phone
+/// (`ClearSecondFactor`): nobody, until the app says so — or a kit that uses this one, for its own actor alone. It clears
+/// the second-step columns and spends the account's open challenges and recovery codes; it never reads a secret.
+[Extensible] virtual policy ResetsSecondFactor => false;
 
 /// A forgotten-password request: the token is mailed, only its HASH is kept, and it works once, for an hour.
 ///
@@ -165,9 +195,14 @@ public class AccountsSetup {
   public AccountEvents Events = new AccountEvents();
   /// What the kit's text messages say — derive and override to write your own.
   public AccountTexts Texts = new AccountTexts();
-  /// Accounts may add a phone number, proven by a texted code (the account page). Off by default; `SmsSignIn` and
-  /// `SmsSecondStep` turn it on too. Needs `app.Sms` (Osysharp.Sms) to reach anybody — until then the codes are held.
+  /// Accounts keep a phone number (the account page): one for calls — any number, never texted — or one for texts,
+  /// proven by a texted code. Off by default; `SmsSignIn` and `SmsSecondStep` turn it on too. Texts need `app.Sms`
+  /// (Osysharp.Sms) to reach anybody — until then the codes are held.
   public bool ProvePhones = false;
+  /// Which accounts may keep a number FOR TEXTS (`ProvePhone`), when the app keeps numbers at all — every one costs a
+  /// text. By default every account; derive and override `ForTexts` to offer texts to some people only — those the app
+  /// texts. A number for calls costs nothing, and every account may keep one.
+  public PhonePolicy Phone = new PhonePolicy();
   /// A proven number may sign in with a texted code in place of the password. Off by default: whoever takes over a number
   /// (a SIM swap, a port-out) could then sign in with it — choose it where that trade is right for the app's people.
   [OrgPolicy(OrgPolicyMode.Lock)] public bool SmsSignIn = false;
@@ -217,6 +252,24 @@ public class OwnDoorPolicy {
 public class AddressProofPolicy {
   /// Must `account` prove its address before it is signed in? Asked at each sign-in and sign-up of an unproven account.
   public virtual bool Required(User account) { return false; }
+}
+
+/// Which accounts may keep a phone number FOR TEXTS, added themselves on the account page (`ProvePhone`). By default every
+/// account, when the app keeps numbers (`ProvePhones`, `SmsSignIn`, `SmsSecondStep`). Every number for texts costs the app
+/// a text to confirm it, so an app that texts some people only — staff an alert is texted to, say — derives and says whose:
+///
+///     public class StaffAreTexted : PhonePolicy {
+///       public override bool ForTexts(User account) { return RoleGrant.Any(g => g.Member == account && g.Role == AppRole.Staff); }
+///     }
+///     app.Accounts = new AccountsSetup { …, ProvePhones = true, Phone = new StaffAreTexted() };
+///
+/// An account it does not offer texts to is refused a new number for texts — nothing is texted — and its account page
+/// offers it a number for calls only; a number it already has may still be removed, or kept for calls. An app's own door
+/// that proves a number (`TextPhoneCode`, `ProvePhoneCode`) decides for itself and is not asked.
+public class PhonePolicy {
+  /// May `account` keep a number for texts — confirmed by a texted code? Asked as the sign-in flow, and as the account
+  /// itself (its account page).
+  public virtual bool ForTexts(User account) { return true; }
 }
 
 /// Who must use two-step sign-in. By default nobody must and everybody may; an app that needs it for some people
@@ -272,6 +325,20 @@ public TimeSpan ResetLifetime() { return TimeSpan.FromHours(1); }
 /// How long an address-verification link works.
 public TimeSpan VerificationLifetime() { return TimeSpan.FromDays(3); }
 
+/// How many reset links, and how many address checks (a verification, a move's confirmation), one account is mailed in
+/// an hour — and one address, whichever accounts ask. Past it, the ask is answered as any other and nothing is sent.
+int MailsAnHour() { return 5; }
+
+/// …and in a day.
+int MailsADay() { return 20; }
+
+/// How many codes one account is texted in a day, outside a sign-in's own second step, on top of five an hour for one
+/// purpose (`TextCode`).
+int TextsADay() { return 10; }
+
+/// How many codes that prove a number one number is texted in a day, whichever accounts ask (`TextCode`).
+int ProvingTextsToANumberADay() { return 10; }
+
 /// What is kept in place of a mailed secret. One-way, so a row is not a credential.
 public string TokenHash(string token) { return Crypto.Sha256Hex(token.Trim()); }
 
@@ -303,6 +370,7 @@ public class AccountsFacts {
   /// The mark each of those providers' buttons shows.
   public List<ProviderMark> Marks = [];
   /// What the app lets a phone number do — the account page's phone section and the sign-in page's text-message door.
+  /// `Phones`: accounts keep a number (for calls, and — where `AccountsSetup.Phone` offers it — for texts).
   public bool Phones = false;
   public bool SmsSignIn = false;
   public bool SmsSecondStep = false;

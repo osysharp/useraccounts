@@ -21,11 +21,21 @@ app.Accounts = new AccountsSetup {
   AddressProof = new ContractorsProveTheirAddress(),
   // Everything a phone number can do, so the tests reach every texted flow.
   ProvePhones = true, SmsSignIn = true, SmsSecondStep = true,
+  // …a number for texts to every account, unless a test says otherwise (`PhoneOffered`).
+  Phone = new DeskPhones(),
   // The desk's own company sign-in shows a building on its buttons (the kit has no mark for it).
   Marks = new DeskMarks(),
   // Whose application the desk's own door has not finished — nobody's, until a test says (`DoorUnfinished`).
   OwnDoor = new DeskOwnDoor(),
 };
+
+/// Every account may keep a number for texts on the desk, unless a test stubs `PhoneOffered`.
+public class DeskPhones : PhonePolicy {
+  public override bool ForTexts(User account) { return PhoneOffered(account.Email); }
+}
+
+/// Whether the account at `email` may keep a number for texts — yes, until a test says otherwise.
+bool PhoneOffered(string email) { return true; }
 
 /// The desk's own door, finished for everybody unless a test stubs `DoorUnfinished`.
 public class DeskOwnDoor : OwnDoorPolicy {

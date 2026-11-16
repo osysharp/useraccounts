@@ -129,6 +129,18 @@ void a_taken_address_is_told_at_most_once_a_minute() {
   runas (AuthBootstrap) { Assert.Equal(1, MailsTo("ada@desk.test", "You already have an account")); }
 }
 
+// …and five times an hour: a sign-up page anybody may use is not a way to fill a stranger's inbox.
+// SECURITY-INVARIANT(accounts-mail-to-an-address-is-rate-limited).
+[Test(Signups)]
+void a_taken_address_is_told_at_most_five_times_an_hour() {
+  RequireProof();
+  for (var i = 1; i <= 6; i++) {
+    runas (AuthBootstrap) { SignUp("ada@desk.test", "any-long-password", "Somebody"); }
+    TestClock.Advance(TimeSpan.FromMinutes(2));
+  }
+  runas (AuthBootstrap) { Assert.Equal(5, MailsTo("ada@desk.test", "You already have an account")); }
+}
+
 [Test(Signups)]
 void without_proof_required_the_right_password_on_a_taken_address_signs_its_owner_in() {
   SignInStep own = new SignInStep();

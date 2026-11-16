@@ -69,9 +69,84 @@ void changing_the_address_needs_the_current_password() {
   runas (AuthBootstrap) { Assert.Equal(0, MailsTo("bo.new@desk.test", "")); }
 }
 
+// ⭐ A TAKEN ADDRESS IS ANSWERED AS A FREE ONE: anybody can make an account, so a "taken" answer here would tell any of
+// them which addresses have accounts. Both asks answer the same, both tell the old address with its cancel link, and both
+// show as pending on the account page; the taken address is mailed nothing, and the account can never move to it.
+// SECURITY-INVARIANT(accounts-an-address-change-does-not-say-who-has-an-account).
 [Test(People)]
-void an_address_another_account_uses_is_refused() {
-  runas (AuthBootstrap) { Assert.Throws(() => ChangeEmail("bo@desk.test", "correct-horse-2", "ada@desk.test")); }
+void a_taken_address_is_answered_as_a_free_one_and_is_mailed_nothing() {
+  string taken = "x";
+  string free = "x";
+  runas (AuthBootstrap) { taken = ChangeEmail("bo@desk.test", "correct-horse-2", "ada@desk.test"); }
+  runas (Bo) { Assert.Equal("ada@desk.test", MyAddress().Pending); }
+  runas (AuthBootstrap) { free = ChangeEmail("bo@desk.test", "correct-horse-2", "bo.free@desk.test"); }
+  Assert.Equal("", taken);
+  Assert.Equal(free, taken);
+  runas (AuthBootstrap) {
+    Assert.Equal(2, MailsTo("bo@desk.test", "Your Kit Test Desk address is changing"));
+    Assert.Equal(0, MailsTo("ada@desk.test", ""));
+    Assert.Equal(1, MailsTo("bo.free@desk.test", "Confirm your new address"));
+    Assert.Equal("bo@desk.test", User.Single(u => u.DisplayName == "Bo").Email);
+  }
+}
+
+// ⭐ ASKING TO MOVE THE ADDRESS MAILS A BOUNDED NUMBER OF TIMES — the new address is somebody else's inbox, and the old
+// one is told each time. Once a minute to one address; five an hour and twenty a day from one account; five an hour and
+// twenty a day to one address, whichever accounts ask. Every ask is answered the same, mailed or not.
+// SECURITY-INVARIANT(accounts-mail-to-an-address-is-rate-limited).
+[Test(People)]
+void asking_to_move_twice_within_a_minute_mails_once() {
+  runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.new@desk.test"); }
+  string again = "x";
+  runas (AuthBootstrap) { again = ChangeEmail("bo@desk.test", "correct-horse-2", "bo.new@desk.test"); }
+  Assert.Equal("", again);
+  runas (AuthBootstrap) {
+    Assert.Equal(1, MailsTo("bo.new@desk.test", "Confirm your new address"));
+    Assert.Equal(1, MailsTo("bo@desk.test", "Your Kit Test Desk address is changing"));
+  }
+}
+
+[Test(People)]
+void an_account_asks_to_move_five_times_an_hour_and_an_address_is_asked_for_five_times_an_hour() {
+  // One account, six new addresses in an hour: the sixth is answered the same and mailed nothing, nor is the old address.
+  for (var i = 1; i <= 6; i++) {
+    string answer = "x";
+    runas (AuthBootstrap) { answer = ChangeEmail("bo@desk.test", "correct-horse-2", $"bo.{i}@desk.test"); }
+    Assert.Equal("", answer);
+    TestClock.Advance(TimeSpan.FromMinutes(2));
+  }
+  runas (AuthBootstrap) {
+    Assert.Equal(1, MailsTo("bo.5@desk.test", "Confirm your new address"));
+    Assert.Equal(0, MailsTo("bo.6@desk.test", ""));
+    Assert.Equal(5, MailsTo("bo@desk.test", "Your Kit Test Desk address is changing"));
+  }
+  // Six accounts, one address in an hour: the sixth account's ask is mailed nothing — minting accounts does not lift it.
+  runas (AuthBootstrap) {
+    for (var i = 1; i <= 6; i++) {
+      new User { Email = $"minted.{i}@desk.test", DisplayName = $"Minted {i}", PasswordHash = Security.HashPassword("correct-horse-9"),
+                 EmailVerifiedAt = DateTime.UtcNow };
+    }
+  }
+  for (var i = 1; i <= 6; i++) {
+    runas (AuthBootstrap) { ChangeEmail($"minted.{i}@desk.test", "correct-horse-9", "victim@elsewhere.test"); }
+  }
+  runas (AuthBootstrap) {
+    Assert.Equal(5, MailsTo("victim@elsewhere.test", "Confirm your new address"));
+    Assert.Equal(1, MailsTo("minted.5@desk.test", "Your Kit Test Desk address is changing"));
+    Assert.Equal(0, MailsTo("minted.6@desk.test", ""));
+  }
+}
+
+// "Send me a new link" is bounded the same way: once a minute, five an hour, twenty a day — and answered "" whatever it did.
+[Test(People)]
+void a_new_verification_link_is_mailed_at_most_five_times_an_hour() {
+  for (var i = 1; i <= 6; i++) {
+    string answer = "x";
+    runas (AuthBootstrap) { answer = RequestVerification("ada@desk.test"); }
+    Assert.Equal("", answer);
+    TestClock.Advance(TimeSpan.FromMinutes(2));
+  }
+  runas (AuthBootstrap) { Assert.Equal(5, MailsTo("ada@desk.test", "Confirm your address")); }
 }
 
 [Test(People)]
@@ -126,13 +201,15 @@ void a_signed_in_account_cannot_verify_itself_or_move_its_own_address() {
   }
 }
 
-// Two asks to move the address mail two links; the account moves on whichever is opened first, and that spends the
-// other. Opening the other afterwards is not a failure to report — the change it asked for has happened.
+// Two asks to move the address (a minute apart — within it, the second mails nothing) mail two links; the account moves
+// on whichever is opened first, and that spends the other. Opening the other afterwards is not a failure to report — the
+// change it asked for has happened.
 [Test(People)]
 void a_second_link_for_a_change_that_already_happened_says_so() {
   runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.new@desk.test"); }
   string first = "";
   runas (AuthBootstrap) { first = TokenIn("bo.new@desk.test", "/verify-email/"); }
+  TestClock.Advance(TimeSpan.FromMinutes(2));
   runas (AuthBootstrap) { ChangeEmail("bo@desk.test", "correct-horse-2", "bo.new@desk.test"); }
   string second = "";
   runas (AuthBootstrap) { second = TokenIn("bo.new@desk.test", "/verify-email/"); }
@@ -200,7 +277,9 @@ void the_account_page_takes_the_change_then_the_password_and_mails_one_link() {
   Ui.Visit("/account");
   Assert.Visible("Confirmation sent to bo.new@desk.test");
   Assert.Hidden("Change address…");
-  // Resend asks for the password too, and mails the same address one more link.
+  // Resend asks for the password too, and mails the same address one more link — a minute on, since an address check
+  // is mailed at most once a minute.
+  TestClock.Advance(TimeSpan.FromMinutes(2));
   Ui.Click("Resend");
   Ui.Fill("Current password", "correct-horse-2");
   Ui.Click("Confirm");

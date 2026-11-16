@@ -189,3 +189,21 @@ void an_auth_method_called_from_a_test_helper_is_refused_with_what_to_do_in_a_te
   Assert.Contains("runas (AuthBootstrap)", e.Message);
   Assert.DoesNotContain("call it from the page itself", e.Message);
 }
+
+/// A declared actor's account is the platform's, entered only for the code that declares it: whoever reads mail at its
+/// address still never signs in as it — no sign-in ticket is ever issued for it, by a reset link or a password.
+/// SECURITY-INVARIANT(an-actors-account-never-signs-in-with-a-key).
+[Test]
+void nobody_signs_in_as_an_actors_account_even_holding_its_mailbox() {
+  Assert.NotNull(Actor.Of<DeskRobot>());
+  runas (AuthBootstrap) { RequestPasswordReset("desk-robot@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("desk-robot@desk.test", "/reset-password/"); }
+  Assert.NotEqual("", token);
+  runas (AuthBootstrap) { Assert.Throws(() => ResetPassword(token, "a-robots-horse-9")); }
+  runas (AuthBootstrap) {
+    var ticket = "";
+    try { ticket = SignIn("desk-robot@desk.test", "a-robots-horse-9").Ticket; } catch (Exception e) { ticket = ""; }
+    Assert.Equal("", ticket);
+  }
+}

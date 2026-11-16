@@ -315,3 +315,115 @@ void a_shared_number_signs_in_the_one_account_left_that_may_use_it() {
                                       && c.Account.Email == "bo@desk.test"));
   }
 }
+
+// ⭐ A NUMBER IS TEXTED AT MOST TEN CODES A DAY TO PROVE IT, WHOEVER ASKS — accounts are cheap to make, and every text
+// costs the app money (a number that charges per text received is the point of pumping). The eleventh account's ask is
+// answered "sent" as any other and texts nothing. SECURITY-INVARIANT(accounts-texts-to-a-number-are-rate-limited).
+[Test(Phones)]
+void a_number_is_texted_ten_proving_codes_a_day_however_many_accounts_ask() {
+  runas (AuthBootstrap) {
+    for (var i = 1; i <= 11; i++) {
+      new User { Email = $"minted.{i}@desk.test", DisplayName = $"Minted {i}", EmailVerifiedAt = DateTime.UtcNow };
+    }
+  }
+  for (var i = 1; i <= 11; i++) {
+    runas (AuthBootstrap) { TextPhoneCode(User.Single(u => u.Email == $"minted.{i}@desk.test"), "+46700000077"); }
+  }
+  runas (AuthBootstrap) { Assert.Equal(10, TextsTo("+46700000077")); }
+  // A day later it is texted again.
+  TestClock.Advance(TimeSpan.FromHours(25));
+  runas (AuthBootstrap) { TextPhoneCode(User.Single(u => u.Email == "minted.11@desk.test"), "+46700000077"); }
+  runas (AuthBootstrap) { Assert.Equal(11, TextsTo("+46700000077")); }
+}
+
+// …and one account is texted at most ten codes a day, on top of five an hour for one purpose.
+[Test(Phones)]
+void an_account_is_texted_ten_codes_a_day() {
+  for (var i = 1; i <= 11; i++) {
+    string sent = "";
+    runas (AuthBootstrap) { sent = ProvePhone("ada@desk.test", "correct-horse-1", $"+4670000010{i}"); }
+    Assert.Equal("sent", sent);
+    TestClock.Advance(i % 5 == 0 ? TimeSpan.FromMinutes(61) : TimeSpan.FromMinutes(2));
+  }
+  runas (AuthBootstrap) {
+    Assert.Equal(1, TextsTo("+46700000101"));
+    Assert.Equal(1, TextsTo("+467000001010"));
+    Assert.Equal(0, TextsTo("+467000001011"));
+  }
+}
+
+// ⭐ AN APP MAY OFFER TEXTS TO SOME ACCOUNTS ONLY (`AccountsSetup.Phone.ForTexts`): an account it does not offer texts to
+// is refused a new number for texts — nothing is texted — and its page offers a number for calls only, which it may keep;
+// a number it already has may still be removed. SECURITY-INVARIANT(accounts-a-phone-is-added-only-where-the-app-offers-one).
+[Test(Phones)]
+void an_account_the_app_offers_no_phone_cannot_add_one_but_may_remove_its_own() {
+  PhoneOffered.Stub(email => email != "ada@desk.test" && email != "bo@desk.test");
+  runas (AuthBootstrap) { Assert.Throws(() => ProvePhone("ada@desk.test", "correct-horse-1", "+46700000001")); }
+  runas (AuthBootstrap) { Assert.Equal(0, TextsTo("+46700000001")); }
+  runas (Ada) {
+    Assert.False(MyPhone().MayText);
+    Assert.True(MyPhone().MayAdd);
+  }
+  // …but she keeps a number for calls — a landline — and nothing is texted to it.
+  runas (AuthBootstrap) { Assert.Equal("", ProvePhone("ada@desk.test", "correct-horse-1", "+46 8 123 456 78", forTexts: false)); }
+  runas (Ada) { Assert.Equal("+46812345678", MyPhone().Number); }
+  runas (AuthBootstrap) { Assert.Equal(0, TextsTo("+46812345678")); }
+  // Bo keeps the number he has until he removes it — and may remove it.
+  runas (AuthBootstrap) { Assert.Throws(() => ProvePhone("bo@desk.test", "correct-horse-2", "+46700000005")); }
+  runas (AuthBootstrap) { Assert.Equal("", ProvePhone("bo@desk.test", "correct-horse-2", "")); }
+  runas (Bo) { Assert.Equal("", MyPhone().Number); }
+  // An account it does offer texts to proves a number as before.
+  PhoneOffered.Stub(email => true);
+  runas (AuthBootstrap) { Assert.Equal("sent", ProvePhone("ada@desk.test", "correct-horse-1", "+46700000001")); }
+  runas (Ada) { Assert.True(MyPhone().MayText); }
+}
+
+// ⭐ ONLY A NUMBER FOR TEXTS WHOSE CODE CAME BACK IS EVER TEXTED (owner 15 Nov: "to send information as text, it needs to be
+// a cell number"). Ada keeps a number for calls: recorded with no code, and nothing uses it — it signs nobody in, it cannot
+// be her second step, nothing is texted to it. She asks to use it for texts: its code is the one text it gets, and until
+// the code comes back it is still a number for calls. Once it does, it is used; made a number for calls again, it is never
+// texted again. SECURITY-INVARIANT(accounts-only-a-confirmed-number-for-texts-is-texted) — red with `NumberToText`'s check
+// removed (the first sign-in ask texts a code to the number for calls).
+[Test(Phones)]
+void a_texts_number_is_used_only_after_its_code_is_confirmed() {
+  runas (AuthBootstrap) { Assert.Equal("", ProvePhone("ada@desk.test", "correct-horse-1", "+46 70 000 00 21", forTexts: false)); }
+  runas (AuthBootstrap) { Assert.True(SignInWithPhone("+46700000021").CodeSent); }
+  runas (AuthBootstrap) { Assert.Equal(0, TextsTo("+46700000021")); }
+  runas (AuthBootstrap) { Assert.Throws(() => SetSmsSecondStep("ada@desk.test", "correct-horse-1", true)); }
+  runas (AuthBootstrap) { Assert.Equal("", NumberToText(User.Single(u => u.Email == "ada@desk.test"))); }
+  runas (Ada) {
+    Assert.Equal("+46700000021", MyPhone().Number);
+    Assert.False(MyPhone().Proven);
+  }
+  // For texts: the code is texted, and nothing else is until it comes back.
+  runas (AuthBootstrap) { Assert.Equal("sent", ProvePhone("ada@desk.test", "correct-horse-1", "+46700000021")); }
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000021"); }
+  runas (AuthBootstrap) { SignInWithPhone("+46700000021"); }
+  runas (AuthBootstrap) { Assert.Throws(() => SetSmsSecondStep("ada@desk.test", "correct-horse-1", true)); }
+  runas (AuthBootstrap) { Assert.Equal(1, TextsTo("+46700000021")); }
+  runas (Ada) { Assert.False(MyPhone().Proven); }
+  // The code comes back: a number for texts, and used.
+  runas (AuthBootstrap) { Assert.Equal("", ProvePhone("ada@desk.test", "correct-horse-1", "+46700000021", code)); }
+  runas (Ada) { Assert.True(MyPhone().Proven); }
+  runas (AuthBootstrap) { Assert.True(SignInWithPhone("+46700000021").CodeSent); }
+  runas (AuthBootstrap) { Assert.Equal(2, TextsTo("+46700000021")); }
+  // Kept for calls again: never texted again.
+  runas (AuthBootstrap) { Assert.Equal("", ProvePhone("ada@desk.test", "correct-horse-1", "+46700000021", forTexts: false)); }
+  TestClock.Advance(TimeSpan.FromMinutes(2));
+  runas (AuthBootstrap) { SignInWithPhone("+46700000021"); }
+  runas (AuthBootstrap) { Assert.Equal(2, TextsTo("+46700000021")); }
+  runas (Ada) { Assert.False(MyPhone().Proven); }
+}
+
+/// The 1.5 form `NumberThisAccountMayProve`, kept so code written against it still compiles, answers what it did: the
+/// number as the kit keeps it, and the sentence for one written without its country code.
+[Test(Phones)]
+void the_1_5_form_answers_a_number_as_the_kit_keeps_it() {
+  runas (AuthBootstrap) {
+    var ada = User.Single(u => u.Email == "ada@desk.test");
+    Assert.Equal("+46700000001", NumberThisAccountMayProve(ada, "+46 70 000 00 01"));
+    var refused = Assert.Throws<ValidationException>(() => NumberThisAccountMayProve(ada, "070 000 00 01"));
+    Assert.Contains("country code", refused.Message);
+  }
+}

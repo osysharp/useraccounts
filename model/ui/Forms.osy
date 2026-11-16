@@ -612,6 +612,8 @@ public component AccountSettings() {
   string newEmail = "";
   string newPassword = "";
   string newPhone = "";
+  // What the number in the phone dialog is for: calls (any number, never texted) or texts (a mobile, confirmed by a code).
+  PhoneUse phoneUse = PhoneUse.Calls;
   string current = "";
   string code = "";
   string textedCode = "";
@@ -630,6 +632,10 @@ public component AccountSettings() {
   }
 
   action OpenUnlink(string p) { provider = p; Open("unlink"); }
+
+  // The phone dialog opens on the number the account has and what it is for — a new number is for calls until the
+  // person chooses texts, which costs a text and needs a mobile.
+  action OpenPhone(PhoneUse use) { newPhone = phone.Number; phoneUse = phone.MayText ? use : PhoneUse.Calls; Open("phone"); }
 
   action OpenPasskey(string which, PasskeyFacts k) { passkeyId = k.CredentialId; passkeyName = k.Name; Open(which); }
 
@@ -701,9 +707,13 @@ public component AccountSettings() {
         twoStep = MySecondFactor();
         // An account that must use it moves to another phone this way: off, then set up again at once.
         if (twoStep.Required) { code = ""; change = "two-step-on"; step = "enrol"; } else { Done("Two-step sign-in is off."); }
-      } else if (change == "phone") {
+      } else if (change == "phone" && phoneUse == PhoneUse.Texts) {
         ProvePhone(who, current, newPhone);
         textedCode = ""; code = ""; step = "text";
+      } else if (change == "phone") {
+        // For calls: recorded at once, nothing texted.
+        ProvePhone(who, current, newPhone, "", code, false);
+        Done($"{MyPhone().Number} is saved for calls. Nothing is texted to it.");
       } else if (change == "phone-remove") {
         ProvePhone(who, current, "", "", code);
         Done("Your phone number is removed.");
@@ -866,19 +876,26 @@ public component AccountSettings() {
             }
             }
           }
-          if (facts.Phones) {
-            SettingsSection("Phone", description: "With its country code. A text proves it is yours.") {
+          if (facts.Phones && (phone.MayAdd || phone.Number != "")) {
+            SettingsSection("Phone", description: "A number to reach you on. Texts go only to a mobile, once a code confirms it.") {
               Stack(gap: 3, pb: 5) {
-              Row(gap: 2, align: Align.Center) {
-                if (phone.Number != "" && phone.Proven) {
+              Row(gap: 2, align: Align.Center, wrap: Wrapping.Wrap) {
+                if (phone.Number != "") {
                   Text(phone.Number, fontWeight: FontWeight.Semibold);
-                  Badge("Confirmed", tone: Tone.Success);
+                  if (phone.Proven) { Badge("For texts", tone: Tone.Success); } else { Badge("For calls", tone: Tone.Default); }
                 } else { Text("No number", color: Colors.TextMuted); }
               }
+              if (phone.Number != "" && !phone.Proven) { Text("Nothing is texted to it.", color: Colors.TextMuted); }
               if (phone.SecondStep) { Text("Signing in asks for a code texted to this number.", color: Colors.TextMuted); }
               Row(gap: 2, wrap: Wrapping.Wrap) {
-                Button(phone.Proven ? "Change number…" : "Add a number…", onPress: () => Open("phone"));
-                if (phone.Proven && !phone.SecondStep) { Button("Remove the number…", onPress: () => Open("phone-remove"), tone: Tone.Ghost); }
+                if (phone.MayAdd) {
+                  Button(phone.Number != "" ? "Change number…" : "Add a number…",
+                         onPress: () => OpenPhone(phone.Proven ? PhoneUse.Texts : PhoneUse.Calls));
+                }
+                if (phone.MayText && phone.Number != "" && !phone.Proven) {
+                  Button("Use it for texts…", onPress: () => OpenPhone(PhoneUse.Texts), tone: Tone.Ghost);
+                }
+                if (phone.Number != "" && !phone.SecondStep) { Button("Remove the number…", onPress: () => Open("phone-remove"), tone: Tone.Ghost); }
                 if (facts.SmsSecondStep && phone.Proven && !twoStep.On) {
                   if (phone.SecondStep) { Button("Turn off texted codes…", onPress: () => Open("texted-off"), tone: Tone.Ghost); }
                   else { Button("Text me a code when I sign in…", onPress: () => Open("texted-on"), tone: Tone.Ghost); }
@@ -906,7 +923,7 @@ public component AccountSettings() {
           }
         }
         if (change != "") {
-          Dialog(ChangeTitle(change, provider, phone.Proven), onDismiss: Close) {
+          Dialog(ChangeTitle(change, provider, phone.Number != ""), onDismiss: Close) {
             Stack(gap: 3) {
               if (step == "edit" && change == "address") {
                 Field("New address", value: newEmail, type: "email", onEnter: Save,
@@ -919,12 +936,19 @@ public component AccountSettings() {
                       hint: change == "passkey-add" ? "So you can tell your passkeys apart. Your device asks you to confirm next." : "");
               } else if (step == "edit" && change == "phone") {
                 Field("Phone number", value: newPhone, type: "tel", placeholder: "+46 70 123 45 67", onEnter: Save,
-                      hint: "With its country code. We text it a code to confirm it is yours.");
+                      hint: phoneUse == PhoneUse.Texts ? "With its country code. We text it a code to confirm it is yours."
+                                                       : "With its country code. Any number — a landline too.");
+                if (phone.MayText) {
+                  RadioGroup("What is it for?", value: phoneUse);
+                } else {
+                  Text($"For calls. {facts.AppName} sends no texts to your account, so nothing is texted to it.", color: Colors.TextMuted);
+                }
               } else if (step == "confirm") {
-                Text(ConfirmLine(change, newEmail, newPhone, provider), color: Colors.TextMuted);
+                Text(change == "phone" && phoneUse == PhoneUse.Calls ? PhoneForCallsLine(newPhone) : ConfirmLine(change, newEmail, newPhone, provider),
+                     color: Colors.TextMuted);
                 if (change == "password-remove" || (keys.PasswordOff && IsPasskeyChange(change))) {
                   // Nothing to type: one of the account's passkeys says it is you.
-                } else if (twoStep.On && AsksForCode(change)) {
+                } else if (twoStep.On && (AsksForCode(change) || (change == "phone" && phoneUse == PhoneUse.Calls))) {
                   Field("Current password", value: current, type: "password", autoFocus: !codeFirst);
                   Field("Code from your app", value: code, placeholder: "123 456", autoFocus: codeFirst, onEnter: Confirm,
                         hint: "Type it last, so it is fresh. A recovery code works as well.");
@@ -962,7 +986,8 @@ public component AccountSettings() {
                          onPress: ConfirmWithPasskey, tone: change == "password-remove" || keys.PasswordOff ? Tone.Primary : Tone.Default);
                 }
                 if (change != "password-remove" && !(keys.PasswordOff && IsPasskeyChange(change))) {
-                  Button(change == "phone" || change == "texted-off" ? "Text me a code" : "Confirm", onPress: Confirm, tone: Tone.Primary);
+                  Button((change == "phone" && phoneUse == PhoneUse.Texts) || change == "texted-off" ? "Text me a code" : "Confirm",
+                         onPress: Confirm, tone: Tone.Primary);
                 }
               } else if (step == "text") {
                 Button("Cancel", onPress: Close, tone: Tone.Ghost);
@@ -1017,8 +1042,11 @@ string ConfirmLine(string change, string newEmail, string newPhone, string provi
   return $"To stop {provider} signing you in, confirm it is you.";
 }
 
-/// Does confirming `change` ask for a code from the app (with two-step sign-in on)? A phone change asks for it at its
-/// last step, with the texted code; setting up two-step sign-in and texted codes happen only while it is off.
+/// What the confirmation step says for a number for calls — nothing is texted, so there is no code to wait for.
+string PhoneForCallsLine(string newPhone) { return $"To keep {newPhone.Trim()} for calls, confirm it is you. Nothing is texted to it."; }
+
+/// Does confirming `change` ask for a code from the app (with two-step sign-in on)? A number for texts asks for it at its
+/// last step, with the texted code (a number for calls, at this step); setting up two-step sign-in and texted codes happen only while it is off.
 bool AsksForCode(string change) {
   return change == "address" || change == "password" || change == "recovery-codes" || change == "two-step-off"
          || change == "phone-remove" || change == "unlink" || change == "passkey-add" || change == "passkey-remove";

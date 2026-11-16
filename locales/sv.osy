@@ -473,10 +473,16 @@ translations sv {
   /// AccountSettings · a button's label · at most ~30 characters
   /// shown through Button.label
   button "Use a passkey instead" => "Använd en nyckel i stället";
+  /// AccountSettings · a button's label · at most ~24 characters
+  /// shown through Button.label
+  button "Use it for texts…" => "Använd det för sms…";
   /// AccountSettings · a description
   /// shown through SettingsSection.description
   /// beside: "Address", "Password", "Passkeys"
   description "A code from an app on your phone after your password, so a stolen password is not enough." => "En kod från en app i din telefon efter lösenordet, så att ett stulet lösenord inte räcker.";
+  /// AccountSettings · a description
+  /// shown through SettingsSection.description
+  description "A number to reach you on. Texts go only to a mobile, once a code confirms it." => "Ett nummer du kan nås på. Sms går bara till en mobil, när en kod har bekräftat den.";
   /// AccountSettings · a description
   /// shown through SettingsSection.description
   description "Another account that signs you in here." => "Ett annat konto som loggar in dig här.";
@@ -488,9 +494,6 @@ translations sv {
   /// shown through SettingsSection.description
   /// beside: "Password", "Passkeys", "Two-step sign-in"
   description "Where your mail goes, and how you sign in." => "Dit din e-post går och hur du loggar in.";
-  /// AccountSettings · a description
-  /// shown through SettingsSection.description
-  description "With its country code. A text proves it is yours." => "Med landskod. Ett sms bevisar att det är ditt.";
   /// AccountSettings · a description
   /// shown through SettingsSection.description
   /// beside: "Address", "Password", "Two-step sign-in"
@@ -507,6 +510,9 @@ translations sv {
   hint "We mail it a link; your account moves to it when the link is opened." => "Vi mejlar en länk dit; ditt konto flyttas dit när länken öppnas.";
   /// AccountSettings · a hint under a field
   /// shown through Field.hint
+  hint "With its country code. Any number — a landline too." => "Med landsnummer. Vilket nummer som helst — även fast telefon.";
+  /// AccountSettings · a hint under a field
+  /// shown through Field.hint
   hint "With its country code. We text it a code to confirm it is yours." => "Med landsnummer. Vi sms:ar en kod till det för att bekräfta att det är ditt.";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~26 characters
   /// shown through Field.label
@@ -521,6 +527,12 @@ translations sv {
   /// beside: "Code from your app"
   /// also in ProviderSignIn
   label "Current password" => "Nuvarande lösenord";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~15 characters
+  /// shown through Badge.label
+  label "For calls" => "För samtal";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~15 characters
+  /// shown through Badge.label
+  label "For texts" => "För sms";
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~12 characters
   /// shown through Badge.label
   /// beside: "Unlink…"
@@ -544,6 +556,9 @@ translations sv {
   /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~12 characters
   /// shown through Badge.label
   label "Synced" => "Synkad";
+  /// AccountSettings · a label (a field, a list item, a menu entry) · at most ~21 characters
+  /// shown through RadioGroup.label
+  label "What is it for?" => "Vad är det till?";
   /// AccountSettings · message
   /// placeholders: {facts.AppName} = facts.AppName (string)
   /// shown through Alert.message
@@ -564,12 +579,17 @@ translations sv {
   /// beside: "Your account moves to it when the link in that mail is opened.", "Resend"
   text "Confirmation sent to {address.Pending}" => "Bekräftelse skickad till {address.Pending}";
   /// AccountSettings · text on the page
+  /// placeholders: {facts.AppName} = facts.AppName (string)
+  text "For calls. {facts.AppName} sends no texts to your account, so nothing is texted to it." => "För samtal. {facts.AppName} skickar inga sms till ditt konto, så inget sms skickas till det.";
+  /// AccountSettings · text on the page
   /// beside: "Off"
   text "Lost every device with a passkey? \"Forgot your password?\" on the sign-in page mails you a link that sets one again." => "Har du tappat bort alla enheter med en nyckel? \"Glömt lösenordet?\" på inloggningssidan mejlar dig en länk som sätter ett nytt.";
   /// AccountSettings · text on the page
   text "No number" => "Inget nummer";
   /// AccountSettings · text on the page
   text "No passkeys yet." => "Inga nycklar än.";
+  /// AccountSettings · text on the page
+  text "Nothing is texted to it." => "Inget sms skickas till det.";
   /// AccountSettings · text on the page
   text "Signing in asks for a code texted to this number." => "Inloggningen kräver en kod via sms till det här numret.";
   /// AccountSettings · text on the page
@@ -823,8 +843,6 @@ translations sv {
   // ── ChangeAddressFor ──
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
-  /// also in GiveManagedAccountAnAddress
-  /// also in ChangeEmail
   error "Another account already uses that address." => "Ett annat konto använder redan den adressen.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
@@ -973,6 +991,7 @@ translations sv {
   // ── ConfirmStep ──
   /// ConfirmStep · a button's label · at most ~12 characters
   /// shown through Button.label
+  /// also in SettingNumber
   /// also in AccountSettings
   button "Cancel" => "Avbryt";
 
@@ -1022,6 +1041,11 @@ translations sv {
   /// shown through ValidationException
   error "That account already has an address of its own." => "Det kontot har redan en egen adress.";
 
+  // ── KeptNumber ──
+  /// KeptNumber · an error message
+  /// shown through ValidationException
+  error "Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67." => "Skriv numret med + och landsnummer: +46 70 123 45 67, inte 070 123 45 67.";
+
   // ── LinkProvider ──
   /// LinkProvider · an error message
   /// placeholders: {provider} = provider (string)
@@ -1056,11 +1080,6 @@ translations sv {
   /// shown through ValidationException
   error "Turn two-step sign-in on first." => "Slå på tvåstegsinloggning först.";
 
-  // ── NumberThisAccountMayProve ──
-  /// NumberThisAccountMayProve · an error message
-  /// shown through ValidationException
-  error "Write the number with a + and its country code — +46 70 123 45 67, not 070 123 45 67." => "Skriv numret med + och landsnummer: +46 70 123 45 67, inte 070 123 45 67.";
-
   // ── Osysharp.UserAccounts.AddressChangeState ──
   /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~11 characters
   /// shown through Osysharp.UserAccounts.AddressChangeState.Moved
@@ -1093,6 +1112,16 @@ translations sv {
   /// shown through Osysharp.UserAccounts.ManagedAccountState.Making
   /// beside: "Made"
   label "Making the account" => "Kontot skapas";
+
+  // ── Osysharp.UserAccounts.PhoneUse ──
+  /// Osysharp.UserAccounts.PhoneUse · a label (a field, a list item, a menu entry) · at most ~69 characters
+  /// shown through Osysharp.UserAccounts.PhoneUse.Calls
+  /// beside: "Texts — a mobile. We text it a code to confirm it."
+  label "Calls — any number, a landline too. Never texted." => "Samtal — vilket nummer som helst, även fast telefon. Får aldrig sms.";
+  /// Osysharp.UserAccounts.PhoneUse · a label (a field, a list item, a menu entry) · at most ~70 characters
+  /// shown through Osysharp.UserAccounts.PhoneUse.Texts
+  /// beside: "Calls — any number, a landline too. Never texted."
+  label "Texts — a mobile. We text it a code to confirm it." => "Sms — en mobil. Vi sms:ar en kod till den för att bekräfta den.";
 
   // ── Osysharp.UserAccounts.RoleToldState ──
   /// Osysharp.UserAccounts.RoleToldState · a label (a field, a list item, a menu entry) · at most ~13 characters
@@ -1136,6 +1165,12 @@ translations sv {
   /// shown through PasskeyLine()
   text "Added {added} · last used {used}" => "Tillagd {added} · senast använd {used}";
 
+  // ── PhoneForCallsLine ──
+  /// PhoneForCallsLine · text on the page
+  /// placeholders: {Trim} = newPhone.Trim(…) (string)
+  /// shown through PhoneForCallsLine()
+  text "To keep {Trim} for calls, confirm it is you. Nothing is texted to it." => "Bekräfta att det är du för att spara {Trim} för samtal. Inget sms skickas till det.";
+
   // ── ProvePhone ──
   /// ProvePhone · an error message
   /// shown through ValidationException
@@ -1143,8 +1178,12 @@ translations sv {
   /// ProvePhone · an error message
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
   /// shown through ValidationException
-  /// also in NumberThisAccountMayProve
+  /// also in KeptNumber
   error "{AccountsAppName} does not keep phone numbers." => "{AccountsAppName} sparar inga telefonnummer.";
+  /// ProvePhone · an error message
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through ValidationException
+  error "{AccountsAppName} does not send texts to your account — add the number for calls instead." => "{AccountsAppName} skickar inga sms till ditt konto — lägg till numret för samtal i stället.";
 
   // ── ProvenOwner ──
   /// ProvenOwner · an error message
@@ -1326,7 +1365,7 @@ translations sv {
   // ── SetSmsSecondStep ──
   /// SetSmsSecondStep · an error message
   /// shown through ValidationException
-  error "Add and confirm a phone number first." => "Lägg till och bekräfta ett telefonnummer först.";
+  error "Add a number for texts and confirm it first." => "Lägg till ett nummer för sms och bekräfta det först.";
   /// SetSmsSecondStep · an error message
   /// shown through ValidationException
   error "Two-step sign-in with an authenticator app is on — that is already a stronger second step." => "Tvåstegsinloggning med en autentiseringsapp är på, och det är redan ett starkare andra steg.";
@@ -1529,6 +1568,11 @@ translations sv {
   /// SignUpScreen · a heading
   /// shown through AccountsFrame.heading
   heading "Create an account" => "Skapa ett konto";
+
+  // ── TextCode ──
+  /// TextCode · an error message
+  /// shown through Exception
+  error "A code is texted only to a number confirmed for texts — this one is not, so nothing was sent." => "En kod sms:as bara till ett nummer som är bekräftat för sms — det här är det inte, så inget skickades.";
 
   // ── UnlinkProvider ──
   /// UnlinkProvider · an error message

@@ -77,6 +77,13 @@ public ManagedAccountRequest MakeManagedAccount(string name, bool lookAfterIt = 
 /// Give the managed `account` an address of its own: a link goes to `address`, and the account moves there only when
 /// it is opened — then its person signs in by choosing a password ("forgot password"). Only the account's guardian may,
 /// or — for an account made with none — whoever may make managed accounts. Throws the sentence to show.
+///
+/// An address another account uses is answered exactly as a free one, and is mailed nothing — the account can never move
+/// there (`ConfirmAddressChange`) — so this says nothing about who has an account
+/// (SECURITY-INVARIANT(accounts-an-address-change-does-not-say-who-has-an-account)). Mailed at most as `MayMailACheck`
+/// allows, per account and per address (SECURITY-INVARIANT(accounts-mail-to-an-address-is-rate-limited)) — asked by
+/// its run, which reads every check; past it, nothing is sent, and the answer is the same. Guarded by tests/managed.test.osy
+/// (giving_an_address_is_mailed_within_the_limits_and_a_taken_address_is_answered_as_a_free_one).
 [Server, Authorize(MakesManagedAccounts)]
 public void GiveManagedAccountAnAddress(User account, string address) {
   var record = ManagedAccountRequest.FirstOrDefault(r => r.Account == account);
@@ -87,7 +94,6 @@ public void GiveManagedAccountAnAddress(User account, string address) {
   }
   var normalised = NormalisedEmail(address);
   if (!LooksLikeEmail(normalised)) { throw new ValidationException("That does not look like an email address."); }
-  if (Principal.Any(p => p.Email == normalised)) { throw new ValidationException("Another account already uses that address."); }
   new ManagedAccountAddress { Account = account, Address = normalised };
 }
 
@@ -106,7 +112,9 @@ public entity ManagedAccountAddress {
   }
 }
 
-/// Sends the link that gives a managed account its address — as the system, in the commit that gave it.
+/// Sends the link that gives a managed account its address — as the system, in the commit that gave it — when
+/// `MayMailACheck` allows. An address another account uses gets its check recorded (it counts against the limits) and is
+/// mailed nothing.
 public workflow ManagedAccountLinking {
   Tracks    = ManagedAccountAddress.State;
   Autostart = true;
@@ -114,7 +122,10 @@ public workflow ManagedAccountLinking {
 
   state Making {
     enter {
-      SendCheck(this.Item.Account, this.Item.Address, true);
+      var address = this.Item.Address;
+      if (MayMailACheck(this.Item.Account, address)) {
+        IssueEmailCheck(this.Item.Account, address, true, mail: !Principal.Any(p => p.Email == address));
+      }
       goto Made;
     }
   }

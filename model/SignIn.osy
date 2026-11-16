@@ -124,16 +124,16 @@ public SignInStep ContinueSignIn(User account) {
   if (TextedSecondStep(account)) {
     var token = Security.RandomId(32);
     var challenge = new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime() };
-    TextCode(account, CodePurpose.SecondStep, account.Phone!, challenge);
-    return new SignInStep { Challenge = token, ChallengeBy = "sms", Account = MaskedPhone(account.Phone!) };
+    TextCode(account, CodePurpose.SecondStep, NumberToText(account), challenge);
+    return new SignInStep { Challenge = token, ChallengeBy = "sms", Account = MaskedPhone(NumberToText(account)) };
   }
   return new SignInStep { Ticket = Admit(account) };
 }
 
-/// Does `account` sign in with a texted code after its password — it chose to, the app offers it, and its number is proven?
+/// Does `account` sign in with a texted code after its password — it chose to, the app offers it, and it has a number for
+/// texts whose code came back (`NumberToText`)?
 bool TextedSecondStep(User account) {
-  return account.SmsSecondStep && account.Phone != null && account.PhoneVerifiedAt != null
-    && App.Setting<AccountsSetup>().SmsSecondStep;
+  return account.SmsSecondStep && NumberToText(account) != "" && App.Setting<AccountsSetup>().SmsSecondStep;
 }
 
 /// The step for an account that must set two-step sign-in up before it gets a ticket: an enrolment token, and the
@@ -212,8 +212,8 @@ public SignInStep SignUpAtDoor(string email, string password, string name) {
 /// app's `AccountKinds.New`, and the roles a sign-up is given); an address that already has an account is mailed a code
 /// for that one. `ProveDoorCode` takes the code back. Throws the sentence to show for something that is not an address.
 ///
-/// Once a minute and five times an hour per account, like every code, so nobody can fill a stranger's inbox from the
-/// page; an inactive or managed account, another kind of principal and an address no mail reaches are mailed nothing.
+/// Once a minute, five times an hour and twenty a day per account (and so per address), so nobody can fill a stranger's
+/// inbox from the page; an inactive or managed account, another kind of principal and an address no mail reaches are mailed nothing.
 ///
 /// SECURITY-INVARIANT(accounts-door-code-does-not-say-who-has-an-account): every address that looks like one is answered
 /// the same `MustVerify` step — new, taken, or mailed nothing — so only the mailbox learns more. Guarded by
@@ -237,12 +237,15 @@ public SignInStep MailDoorCode(string email, string name = "") {
     GrantNewAccountRoles(account, first);
   }
   if (!account.IsActive || IsManaged(account)) { return answer; }
-  // Once a minute, and five an hour: codes made in the last minute lapse after `aMinuteAgo`, the last hour's after `anHourAgo`.
+  // Once a minute, five an hour and twenty a day: codes made in the last minute lapse after `aMinuteAgo`, the last hour's
+  // after `anHourAgo`, the last day's after `aDayAgo`.
   var now = DateTime.UtcNow;
   var aMinuteAgo = now + CodeLifetime() - TimeSpan.FromMinutes(1);
   var anHourAgo = now + CodeLifetime() - TimeSpan.FromHours(1);
+  var aDayAgo = now + CodeLifetime() - TimeSpan.FromDays(1);
   if (OneTimeCode.Any(c => c.Account == account && c.Purpose == CodePurpose.DoorCode && c.ExpiresAt > aMinuteAgo)) { return answer; }
-  if (OneTimeCode.Count(c => c.Account == account && c.Purpose == CodePurpose.DoorCode && c.ExpiresAt > anHourAgo) >= 5) { return answer; }
+  if (OneTimeCode.Count(c => c.Account == account && c.Purpose == CodePurpose.DoorCode && c.ExpiresAt > anHourAgo) >= MailsAnHour()) { return answer; }
+  if (OneTimeCode.Count(c => c.Account == account && c.Purpose == CodePurpose.DoorCode && c.ExpiresAt > aDayAgo) >= MailsADay()) { return answer; }
   var code = IssueCode(account, CodeChannel.Email, CodePurpose.DoorCode, address);
   SendRendered(address, setup.Mails.DoorCode(address, code), "door-" + Security.RandomId(16));
   return answer;
@@ -322,16 +325,22 @@ void GrantNewAccountRoles(User account, bool first) {
 }
 
 /// Tell `address` it already has an account — the mail a sign-up for a taken address sends instead of a code. Once a
-/// minute, so nobody can fill a stranger's inbox from the sign-up page.
+/// minute, five times an hour and twenty a day, so nobody can fill a stranger's inbox from the sign-up page.
 void TellAddressIsTaken(string address) {
   var mail = App.Setting<AccountsSetup>().Mails.AccountExists(address, AccountsLink("/login"), AccountsLink("/forgot-password"));
-  var aMinuteAgo = DateTime.UtcNow - TimeSpan.FromMinutes(1);
+  var now = DateTime.UtcNow;
+  var aMinuteAgo = now - TimeSpan.FromMinutes(1);
+  var anHourAgo = now - TimeSpan.FromHours(1);
+  var aDayAgo = now - TimeSpan.FromDays(1);
   if (OutgoingMail.Any(m => m.To == address && m.Subject == mail.Subject && m.CreatedAt > aMinuteAgo)) { return; }
+  if (OutgoingMail.Count(m => m.To == address && m.Subject == mail.Subject && m.CreatedAt > anHourAgo) >= MailsAnHour()) { return; }
+  if (OutgoingMail.Count(m => m.To == address && m.Subject == mail.Subject && m.CreatedAt > aDayAgo) >= MailsADay()) { return; }
   SendRendered(address, mail);
 }
 
 /// Mail a link to choose a new password, if the address has an account. Answers "" either way — the same answer for an
-/// address with no account is what keeps this from telling a stranger who has one.
+/// address with no account is what keeps this from telling a stranger who has one. Mailed at most once a minute, five
+/// times an hour and twenty times a day to an account (and so to its address); past that, answered "" all the same.
 [AuthMethod]
 public string RequestPasswordReset(string email) {
   var account = User.FirstOrDefault(u => u.Email == NormalisedEmail(email));
@@ -339,8 +348,16 @@ public string RequestPasswordReset(string email) {
   if (account == null || !account.IsActive || IsManaged(account)) { return ""; }
   var now = DateTime.UtcNow;
   // One request a minute: pressing the button twice is one mail, and nobody can flood a person's inbox from the page.
+  // A link asked for at `t` lapses at `t + ResetLifetime()`, so the links asked for since `since` lapse after `since + ResetLifetime()`.
   var askedAMinuteAgo = now + ResetLifetime() - TimeSpan.FromMinutes(1);
   if (PasswordReset.Any(r => r.Account == account && r.UsedAt == null && r.ExpiresAt > askedAMinuteAgo)) {
+    return "";
+  }
+  // SECURITY-INVARIANT(accounts-mail-to-an-address-is-rate-limited): five an hour and twenty a day, used or not.
+  var askedAnHourAgo = now + ResetLifetime() - TimeSpan.FromHours(1);
+  var askedADayAgo = now + ResetLifetime() - TimeSpan.FromDays(1);
+  if (PasswordReset.Count(r => r.Account == account && r.ExpiresAt > askedAnHourAgo) >= MailsAnHour()
+      || PasswordReset.Count(r => r.Account == account && r.ExpiresAt > askedADayAgo) >= MailsADay()) {
     return "";
   }
   var token = Security.RandomId(32);
@@ -417,18 +434,27 @@ public string ChangePassword(string email, string currentPassword, string newPas
 /// proof an account with password sign-in off has. Nothing changes yet: a link goes to the NEW address, and the account
 /// moves when it is opened; the OLD address is told. Asking for the account's own address sends a fresh verification of
 /// it. Answers "", or throws the sentence to show.
+///
+/// SECURITY-INVARIANT(accounts-an-address-change-does-not-say-who-has-an-account): an address another account uses is
+/// answered exactly as a free one — the old address is told, the move shows as pending, and it counts against the same
+/// limits — but the taken address is mailed nothing, and the move can never complete (`ConfirmAddressChange`). Anybody can
+/// make an account, so a "taken" answer here would tell anybody which addresses have accounts. Guarded by
+/// tests/email.test.osy (a_taken_address_is_answered_as_a_free_one_and_is_mailed_nothing).
+///
+/// Mailed at most as `MayMailACheck` allows — past it, answered "" and nothing is sent, to either address.
 [AuthMethod]
 public string ChangeEmail(string email, string currentPassword, string newEmail, string code = "",
                           string passkeyToken = "", string passkeyResponse = "") {
   var account = ProvenOwner(email, currentPassword, code, passkeyToken, passkeyResponse);
   var address = NormalisedEmail(newEmail);
   if (!LooksLikeEmail(address)) { throw new ValidationException("That does not look like an email address."); }
+  if (!MayMailACheck(account, address)) { return ""; }
   if (address == account.Email) {
     if (account.EmailVerifiedAt == null) { SendCheck(account, address, false); }
     return "";
   }
-  if (Principal.Any(p => p.Email == address)) { throw new ValidationException("Another account already uses that address."); }
-  var check = IssueEmailCheck(account, address, true);
+  var taken = Principal.Any(p => p.Email == address);
+  var check = IssueEmailCheck(account, address, true, mail: !taken);
   // The OLD address gets a link of its own that calls the move off: whoever asked knows the password (and, with two-step
   // sign-in on, had a code), so "change your password" alone is no answer to "this was not me".
   var cancelToken = Security.RandomId(32);
@@ -510,15 +536,15 @@ public AddressFacts MyAddress() {
 
 /// Mail a fresh link that proves the account's address, when the address has an active account that has not proven
 /// it yet — what "send me a new link" and an operator's "resend" ask for. Answers "" whether or not it did anything,
-/// so it never tells a stranger which addresses have accounts; asked twice within a minute, it mails once.
+/// so it never tells a stranger which addresses have accounts; asked twice within a minute, it mails once, and it mails
+/// at most five times an hour and twenty a day (`MayMailACheck`).
 [AuthMethod]
 public string RequestVerification(string email) {
   var account = User.FirstOrDefault(u => u.Email == NormalisedEmail(email));
   if (account == null || !account.IsActive || account.EmailVerifiedAt != null || IsManaged(account)) { return ""; }
   // A system account's address is one no message reaches — there is nobody to prove it.
   if (IsUnreachableAddress(account.Email)) { return ""; }
-  var aMinuteAgo = DateTime.UtcNow + VerificationLifetime() - TimeSpan.FromMinutes(1);
-  if (EmailCheck.Any(c => c.Account == account && !c.IsChange && c.UsedAt == null && c.ExpiresAt > aMinuteAgo)) { return ""; }
+  if (!MayMailACheck(account, account.Email)) { return ""; }
   SendCheck(account, account.Email, false);
   return "";
 }
@@ -732,15 +758,45 @@ public User Verified(string email, string password) {
 /// (`isChange` false) or the one it wants to move to. The link works for three days, the code for fifteen minutes.
 void SendCheck(User account, string address, bool isChange) { IssueEmailCheck(account, address, isChange); }
 
-/// `SendCheck`, answering the check it recorded — for a caller that offers a way to call it off.
-internal EmailCheck IssueEmailCheck(User account, string address, bool isChange) {
+/// `SendCheck`, answering the check it recorded — for a caller that offers a way to call it off. With `mail` false the
+/// check is recorded exactly as one that was mailed, and its link and code go nowhere: nobody can ever prove it.
+internal EmailCheck IssueEmailCheck(User account, string address, bool isChange, bool mail = true) {
   var token = Security.RandomId(32);
   var check = new EmailCheck { Account = account, Email = address, IsChange = isChange, TokenHash = TokenHash(token),
                                ExpiresAt = DateTime.UtcNow + VerificationLifetime() };
   var code = IssueCode(account, CodeChannel.Email, CodePurpose.ProveAddress, address, check: check);
-  SendRendered(address, App.Setting<AccountsSetup>().Mails.Verification(account, address, AccountsLink($"/verify-email/{token}"), isChange, code),
-               "verify-" + TokenHash(token));
+  if (mail) {
+    SendRendered(address, App.Setting<AccountsSetup>().Mails.Verification(account, address, AccountsLink($"/verify-email/{token}"), isChange, code),
+                 "verify-" + TokenHash(token));
+  }
   return check;
+}
+
+/// May `account` be mailed another address check (a verification, a move's confirmation) to `address`? Not when it was
+/// mailed one to that address in the last minute — pressing the button twice is one mail; not past `MailsAnHour()` and
+/// `MailsADay()` checks for the account; and not past those to the address, whichever accounts asked — so nobody fills
+/// a stranger's inbox, or makes the app's mail look like spam, however many accounts they make. Each check is counted
+/// whether it was mailed, proven or called off.
+///
+/// SECURITY-INVARIANT(accounts-mail-to-an-address-is-rate-limited): reset links (`RequestPasswordReset`) and address
+/// checks (`RequestVerification`, `ChangeEmail`) are mailed at most once a minute, `MailsAnHour()` an hour and
+/// `MailsADay()` a day — per account, and for checks per address too — and every ask is answered the same, mailed or
+/// not. Guarded by tests/email.test.osy (asking_to_move_twice_within_a_minute_mails_once,
+/// an_account_asks_to_move_five_times_an_hour_and_an_address_is_asked_for_five_times_an_hour,
+/// a_new_verification_link_is_mailed_at_most_five_times_an_hour) and tests/reset.test.osy
+/// (the_sixth_reset_in_an_hour_and_the_twenty_first_in_a_day_mail_nothing).
+bool MayMailACheck(User account, string address) {
+  // A check made at `t` lapses at `t + VerificationLifetime()`, so those made since `since` lapse after `since + VerificationLifetime()`.
+  var now = DateTime.UtcNow;
+  var aMinuteAgo = now + VerificationLifetime() - TimeSpan.FromMinutes(1);
+  var anHourAgo = now + VerificationLifetime() - TimeSpan.FromHours(1);
+  var aDayAgo = now + VerificationLifetime() - TimeSpan.FromDays(1);
+  if (EmailCheck.Any(c => c.Account == account && c.Email == address && c.ExpiresAt > aMinuteAgo)) { return false; }
+  if (EmailCheck.Count(c => c.Account == account && c.ExpiresAt > anHourAgo) >= MailsAnHour()) { return false; }
+  if (EmailCheck.Count(c => c.Account == account && c.ExpiresAt > aDayAgo) >= MailsADay()) { return false; }
+  if (EmailCheck.Count(c => c.Email == address && c.ExpiresAt > anHourAgo) >= MailsAnHour()) { return false; }
+  if (EmailCheck.Count(c => c.Email == address && c.ExpiresAt > aDayAgo) >= MailsADay()) { return false; }
+  return true;
 }
 
 /// A fresh verification of the account's own address, unless a code for it is still live — a sign-in that must prove the
