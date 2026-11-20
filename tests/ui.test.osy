@@ -340,6 +340,21 @@ void the_sign_in_page_offers_each_provider_with_its_mark() {
   Ui.Shot("sign-in-providers");
 }
 
+// On a zone the organisation's own client is offered as `org:<key>`; its button says the label the organisation registered,
+// never the name, shows the mark of its kind, and goes to the platform's authorize for that client (OP-OC1c5).
+[Test(Door)]
+void an_orgs_client_button_says_its_label() {
+  OfferedSignInProviders.Stub(() => new List<string> { "GitHub", "org:acme-okta" });
+  ProviderLabel.Stub(p => p == "org:acme-okta" ? "Acme Okta" : p);
+  ProviderKind.Stub(p => p == "org:acme-okta" ? "google" : "");
+  Ui.Visit("/login");
+  Assert.Visible("Continue with GitHub");
+  Assert.Visible("Continue with Acme Okta");
+  Assert.Hidden("Continue with org:acme-okta");
+  Assert.Equal(Icons.Google, ProviderIcon("org:acme-okta"));
+  Assert.Equal("/api/oauth/authorize?provider=org%3Aacme-okta", ProviderSignInAddress("org:acme-okta"));
+}
+
 // A passkey made by a device the test plays (WebAuthn.TestCreate) — this browser stand-in has no authenticator of its
 // own, so here the page lists, renames and removes passkeys; the real browser's prompt is the visual suite's.
 [Test(Door)]

@@ -1241,6 +1241,15 @@ translations sv {
   /// beside: "If you lose your phone, each of these signs you in once. Save them somewhere safe — a password manager, or on paper. This is the only time they are shown."
   text "Your recovery codes" => "Dina återställningskoder";
 
+  // ── RefuseOffTheRule ──
+  /// RefuseOffTheRule · an error message
+  /// shown through ValidationException
+  error "Signing in is not possible here right now. Contact your administrator." => "Det går inte att logga in här just nu. Kontakta din administratör.";
+  /// RefuseOffTheRule · an error message
+  /// placeholders: {rule.Domain} = rule.Domain (string), {ProviderTypeName} = ProviderTypeName(…) (string)
+  /// shown through ValidationException
+  error "{rule.Domain} accounts sign in with {ProviderTypeName}." => "Konton på {rule.Domain} loggar in med {ProviderTypeName}.";
+
   // ── RefuseWhenLockedOut ──
   /// RefuseWhenLockedOut · an error message
   /// shown through ValidationException

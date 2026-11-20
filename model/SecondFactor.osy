@@ -93,12 +93,21 @@ public entity SignInChallenge {
   /// Made for setting two-step sign-in up (`SignInStep.Enrolment`), not for a code: `SignInWithCode` refuses it, and
   /// `EnableSecondFactor` accepts nothing else in place of the password.
   bool ForEnrolment = false;
+  /// The pending token of a first step that came through a provider (null for a password), sealed under the app's key
+  /// (`Crypto.Encrypt`): a CREDENTIAL, read only by the sign-in flow. The code step and the enrolment REOPEN it in their own request (OP-IdP1b5), so the platform's mint
+  /// validates and judges that seal where the ticket is minted, and a rule that binds the account judges the sign-in the
+  /// person started (SECURITY-INVARIANT provider-only-on-every-door). Cleared when the challenge is spent, when it is
+  /// presented after it lapsed, and when the account's next challenge is made; the seal inside lapses on its own after
+  /// the platform's pending-token lifetime. Guarded by tests/provider-only.test.osy (the_challenge_token_is_unreadable).
+  [MaxLength(4000)] string? PendingToken;
   security {
     allow read, create, update when IsAuthenticator;
     // A second factor's reset spends every open challenge.
     allow read when ResetsSecondFactor;
     allow update UsedAt when ResetsSecondFactor;
+    allow update PendingToken when ResetsSecondFactor;
     deny read TokenHash when !IsAuthenticator;
+    deny read PendingToken when !IsAuthenticator;
   }
 }
 
@@ -146,6 +155,7 @@ public string SignInWithCode(string challenge, string code) {
   var now = DateTime.UtcNow;
   if (pending == null || pending.UsedAt != null || pending.ExpiresAt < now || !pending.Account.IsActive
       || pending.ForEnrolment || (pending.Account.TotpSecret == null && !TextedSecondStep(pending.Account))) {
+    if (pending != null && pending.PendingToken != null) { pending.PendingToken = null; UnitOfWork.Commit(); }
     throw new ValidationException("That sign-in has expired — start again with your password.");
   }
   var account = pending.Account;
@@ -153,12 +163,13 @@ public string SignInWithCode(string challenge, string code) {
   RefuseWhenLockedOut(account);
   if (!CodeFits(account, code)) {
     pending.Misses = pending.Misses + 1;
-    if (pending.Misses >= ChallengeMissesAllowed()) { pending.UsedAt = now; }
+    if (pending.Misses >= ChallengeMissesAllowed()) { SpendChallenge(pending); }
     RecordMiss(account);
     return "";
   }
-  pending.UsedAt = now;
-  return Admit(account);
+  var via = WayOfChallenge(pending);
+  SpendChallenge(pending);
+  return AdmitBy(account, via);
 }
 
 /// The texted half of a sign-in: the code sent to the account's phone for this challenge.
@@ -168,7 +179,7 @@ string SignInWithTextedCode(SignInChallenge pending, string code) {
   // SECURITY-INVARIANT(accounts-sms-is-not-a-required-second-factor) — the second check: a texted code never lets in an
   // account the app requires a second factor of, even one whose challenge was made before the app came to require it.
   if (App.Setting<AccountsSetup>().SecondFactor.Required(account)) {
-    pending.UsedAt = DateTime.UtcNow;
+    SpendChallenge(pending);
     UnitOfWork.Commit();
     throw new ValidationException($"{AccountsAppName()} asks for an authenticator app on your account — a texted code is not enough. Sign in again to set one up.");
   }
@@ -178,11 +189,12 @@ string SignInWithTextedCode(SignInChallenge pending, string code) {
                                                   && c.ExpiresAt > now).ToList(), code);
   if (match == null) {
     pending.Misses = pending.Misses + 1;
-    if (pending.Misses >= ChallengeMissesAllowed()) { pending.UsedAt = DateTime.UtcNow; }
+    if (pending.Misses >= ChallengeMissesAllowed()) { SpendChallenge(pending); }
     return "";
   }
-  pending.UsedAt = DateTime.UtcNow;
-  return Admit(account);
+  var via = WayOfChallenge(pending);
+  SpendChallenge(pending);
+  return AdmitBy(account, via);
 }
 
 /// A fresh key for an authenticator app, and its QR code — labelled with `email` so the phone's list says which account
@@ -201,6 +213,9 @@ public SecondFactorSetup NewSecondFactorSetup(string email) {
 [AuthMethod]
 public SecondFactorOn EnableSecondFactor(string email, string password, string key, string code, string enrolment = "") {
   var account = enrolment != "" ? Enrolling(enrolment) : Verified(email, password);
+  var via = enrolment != "" ? WayOfEnrolment(enrolment) : NotThroughAProvider();
+  // Before the factor is kept: a sign-in the rule refuses sets nothing up on the account.
+  RefuseOffTheRule(account, via);
   if (account.TotpSecret != null) {
     throw new ValidationException("Two-step sign-in is already on. To move it to another phone, turn it off first — that asks for a code.");
   }
@@ -219,7 +234,7 @@ public SecondFactorOn EnableSecondFactor(string email, string password, string k
   account.SecondFactorOnAt = DateTime.UtcNow;
   var codes = IssueRecoveryCodes(account);
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.SecondFactorOn(account));
-  return new SecondFactorOn { Ticket = Admit(account), RecoveryCodes = codes };
+  return new SecondFactorOn { Ticket = AdmitBy(account, via), RecoveryCodes = codes };
 }
 
 /// Turn two-step sign-in off: the password AND a current code (or a recovery code). Answers "", or throws the sentence
@@ -276,7 +291,7 @@ public void ClearSecondFactor(User account) {
   account.SecondFactorOnAt = null;
   account.SmsSecondStep = false;
   foreach (var spare in RecoveryCode.Where(r => r.Account == account && r.UsedAt == null).ToList()) { spare.UsedAt = now; }
-  foreach (var challenge in SignInChallenge.Where(c => c.Account == account && c.UsedAt == null).ToList()) { challenge.UsedAt = now; }
+  foreach (var challenge in SignInChallenge.Where(c => c.Account == account && c.UsedAt == null).ToList()) { SpendChallenge(challenge); }
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.SecondFactorReset(account));
 }
 
@@ -289,11 +304,20 @@ public TimeSpan ChallengeLifetime() { return TimeSpan.FromMinutes(5); }
 public TimeSpan EnrolmentLifetime() { return TimeSpan.FromMinutes(15); }
 
 /// A token proving the first step of a sign-in just passed, for setting two-step sign-in up (`SignInStep.Enrolment`).
-string NewEnrolment(User account) {
+/// `via` as `MustEnrol` takes it: none is a sign-in not through a provider.
+string NewEnrolment(User account, SignInWay? via = null) {
   var token = Security.RandomId(32);
+  DropLapsedSeals(account);
   new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + EnrolmentLifetime(),
-                        ForEnrolment = true };
+                        ForEnrolment = true, PendingToken = SealToKeep(via ?? NotThroughAProvider()) };
   return token;
+}
+
+/// The way the sign-in an enrolment token was made for came in ("" and "" for a token that is not one).
+SignInWay WayOfEnrolment(string enrolment) {
+  var pending = SignInChallenge.FirstOrDefault(c => c.TokenHash == TokenHash(enrolment) && c.ForEnrolment);
+  if (pending == null) { return NotThroughAProvider(); }
+  return WayOfChallenge(pending);
 }
 
 /// The account a live, unspent enrolment token was made for — else throws the sentence to show.
@@ -301,6 +325,7 @@ User Enrolling(string enrolment) {
   var pending = SignInChallenge.FirstOrDefault(c => c.TokenHash == TokenHash(enrolment));
   if (pending == null || !pending.ForEnrolment || pending.UsedAt != null || pending.ExpiresAt < DateTime.UtcNow
       || !pending.Account.IsActive) {
+    if (pending != null && pending.PendingToken != null) { pending.PendingToken = null; UnitOfWork.Commit(); }
     throw new ValidationException("That sign-in has expired — start again from the sign-in page.");
   }
   return pending.Account;
@@ -308,7 +333,7 @@ User Enrolling(string enrolment) {
 
 void SpendEnrolment(string enrolment) {
   var pending = SignInChallenge.FirstOrDefault(c => c.TokenHash == TokenHash(enrolment));
-  if (pending != null) { pending.UsedAt = DateTime.UtcNow; }
+  if (pending != null) { SpendChallenge(pending); }
 }
 
 /// Wrong codes a challenge survives; the next sign-in starts again from the password.
@@ -332,8 +357,16 @@ string RecoveryFingerprint(string code) { return Security.Fingerprint("recovery-
 /// signs in WHICHEVER account it is handed, so open it was an account takeover for any code (or, named by a request, any
 /// signed-in caller) that could read another account. Refused at the call, before its first statement. Guarded by
 /// tests/ticket-only-in-sign-in.test.osy. (`internal` waits for the kit's next major release, because it removes a public function.)
+/// It admits as a sign-in through no provider, so a rule that binds the account refuses it (`AdmitBy`).
 [Authorize(IsAuthenticator)]
-string Admit(User account) {
+string Admit(User account) { return AdmitBy(account, NotThroughAProvider()); }
+
+/// `Admit`, for a sign-in that came in `via` — the one place every kit ticket for a sign-in is issued. Refuses, before
+/// anything is stamped, an account a "Sign-in only through the provider" rule binds when `via` is not that provider with
+/// that organisation (SECURITY-INVARIANT provider-only-on-every-door).
+[Authorize(IsAuthenticator)]
+internal string AdmitBy(User account, SignInWay via) {
+  RefuseOffTheRule(account, via);
   var at = DateTime.UtcNow;
   account.LastLoginAt = at;
   App.Setting<AccountsSetup>().Events.SignedIn(account, at);

@@ -137,12 +137,14 @@ public PasskeyStart StartPasskeySignIn() {
 /// for an inactive account. Guarded by tests/passkeys.test.osy.
 [AuthMethod]
 public SignInStep SignInWithPasskey(string token, string response) {
-  var account = Asserted(token, response).Account;
+  var key = Asserted(token, response);
+  var account = key.Account;
   if (account.EmailVerifiedAt == null && MustProveAddress(account)) {
     EnsureVerification(account);
     return new SignInStep { MustVerify = true, Account = account.Email };
   }
-  return new SignInStep { Ticket = Admit(account) };
+  // Through no provider, with the verified key named, so an app's override may waive ITS binding for it (never the lock).
+  return new SignInStep { Ticket = AdmitBy(account, new SignInWay { Passkey = key.CredentialId }) };
 }
 
 /// Add a passkey to the account `email` names — in two halves, as a browser needs. First (no `addToken`), proof that it
@@ -184,8 +186,10 @@ public PasskeyAdding AddPasskey(string email, string password = "", string code 
     throw new ValidationException("That passkey is already on an account here.");
   }
   var ticket = "";
+  var via = NotThroughAProvider();
   if (enrolment != "") {
     if (Enrolling(enrolment).Id != account.Id) { throw new ValidationException("That sign-in has expired — start again from the sign-in page."); }
+    via = WayOfEnrolment(enrolment);
     SpendEnrolment(enrolment);
   }
   var label = name.Trim() == "" ? "Passkey" : name.Trim();
@@ -193,7 +197,7 @@ public PasskeyAdding AddPasskey(string email, string password = "", string code 
                           SignCount = made.SignCount, BackedUp = made.BackedUp, Name = label.Length > 80 ? label.Substring(0, 80) : label,
                           CreatedAt = now };
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasskeyAdded(account, label));
-  if (enrolment != "") { ticket = Admit(account); }
+  if (enrolment != "") { ticket = AdmitBy(account, via); }
   return new PasskeyAdding { Ticket = ticket };
 }
 
@@ -231,6 +235,8 @@ public string RemovePassword(string email, string passkeyToken, string passkeyRe
     throw new ValidationException("Confirm with one of your passkeys — that is what you will sign in with once the password is gone.");
   }
   var account = ProvenOwner(email, "", "", passkeyToken, passkeyResponse);
+  // A fresh ticket from a passkey: refused for an account that signs in only through its provider.
+  RefuseOffTheRule(account, NotThroughAProvider());
   var now = DateTime.UtcNow;
   account.PasswordHash = null;
   account.PasswordChangedAt = now;

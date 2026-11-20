@@ -49,7 +49,8 @@ public SignInStep SignInWithProvider(string pendingToken) {
     if (mine == null || !mine.IsActive) { return new SignInStep(); }
     // The app's own door has not finished with this account: back to the door, which finishes it from the same seal.
     if (App.Setting<AccountsSetup>().OwnDoor.Unfinished(mine)) { return new SignInStep { OwnDoor = true, Account = mine.Email }; }
-    return ContinueSignIn(mine);
+    // THIS sign-in's seal says the way, never the link (SECURITY-INVARIANT provider-only-on-every-door).
+    return ContinueSignInBy(mine, ProviderWayOf(pendingToken));
   }
   var verified = Security.VerifyPendingOAuthEmail(pendingToken);
   if (verified == "") {
@@ -70,7 +71,7 @@ public SignInStep SignInWithProvider(string pendingToken) {
     }
     Security.LinkOAuthFromPending(account.Id, pendingToken);
     SendRendered(account.Email, setup.Mails.ProviderLinked(account, provider));
-    return ContinueSignIn(account);
+    return ContinueSignInBy(account, ProviderWayOf(pendingToken));
   }
   // Some other kind of account (not a `User`) has the address: it does not sign in here, and a new `User` cannot take it.
   if (Principal.Any(p => p.Email == address)) { return new SignInStep(); }
@@ -96,8 +97,9 @@ SignInStep SignUpWithProvider(string pendingToken, string address) {
   // SECURITY-INVARIANT(accounts-signup-grants-only-the-apps-choice).
   GrantNewAccountRoles(account, first);
   Security.LinkOAuthFromPending(account.Id, pendingToken);
-  if (setup.SecondFactor.Required(account)) { return MustEnrol(account); }
-  return new SignInStep { Ticket = Admit(account) };
+  var via = ProviderWayOf(pendingToken);
+  if (setup.SecondFactor.Required(account)) { return MustEnrol(account, via); }
+  return new SignInStep { Ticket = AdmitBy(account, via) };
 }
 
 /// Link a provider to the account, from its account page: the address and CURRENT password (and a current code with
@@ -106,6 +108,9 @@ SignInStep SignUpWithProvider(string pendingToken, string address) {
 [AuthMethod]
 public string LinkProvider(string email, string password, string pendingToken, string code = "") {
   var account = Verified(email, password);
+  // A password proved this, so it is judged as a sign-in through no provider: a bound account links nothing here — its
+  // provider is linked by signing in through it (OP-IdP1b5, review N1; SECURITY-INVARIANT provider-only-on-every-door).
+  RefuseOffTheRule(account, NotThroughAProvider());
   if (account.TotpSecret != null) { RequireCode(account, code); }
   var provider = Security.PendingOAuthProvider(pendingToken);
   if (provider == "") {
@@ -153,6 +158,15 @@ public class ProviderFacts {
 /// `OfferedSignInProviders.Stub(() => new List<string> { "GitHub" })` rather than depending on whose secrets it runs with.
 public List<string> OfferedSignInProviders() { return Security.SignInProviders(); }
 
+/// What a provider's buttons say: "Continue with {label}". On a zone an organisation that binds its people to its own identity
+/// provider has that client offered here too, named `org:<key>`; its label is the one the organisation registered ("Acme Okta").
+/// Any other provider's label is its name. A test states one with `ProviderLabel.Stub(p => …)`.
+public string ProviderLabel(string provider) { return Security.SignInProviderLabel(provider); }
+
+/// An organisation client's provider kind (`oidc`, `google`, `microsoft`) — "" for any other provider. Its button shows the mark
+/// of its kind: Google's for a google client, the plain sign-in glyph for an OpenID Connect one.
+public string ProviderKind(string provider) { return Security.SignInProviderKind(provider); }
+
 /// The signed-in account's providers. Runs as the account itself: it answers only about its own.
 public ProviderFacts MyProviders() {
   var me = Me();
@@ -186,17 +200,22 @@ public class ProviderMarks {
 /// A provider and the mark its buttons show — what the pages are handed, so the setup itself stays on the server.
 public class ProviderMark {
   public string Provider = "";
+  /// What its buttons say (`ProviderLabel`).
+  public string Label = "";
   public Icons Mark = Icons.Login;
 }
 
 /// The mark a provider's button shows — the ONE mapping (`AccountsSetup.Marks`), so "Continue with …" on the sign-in
 /// page and "Link …" on the account page cannot drift apart.
-public Icons ProviderIcon(string provider) { return App.Setting<AccountsSetup>().Marks.For(provider); }
+public Icons ProviderIcon(string provider) {
+  if (provider.StartsWith("org:")) { return App.Setting<AccountsSetup>().Marks.For(ProviderKind(provider)); }
+  return App.Setting<AccountsSetup>().Marks.For(provider);
+}
 
 /// Each of `providers` with its mark, for a page to draw from (`MarkOf`).
 public List<ProviderMark> ProviderMarksOf(List<string> providers) {
   List<ProviderMark> marks = [];
-  foreach (var p in providers) { marks.Add(new ProviderMark { Provider = p, Mark = ProviderIcon(p) }); }
+  foreach (var p in providers) { marks.Add(new ProviderMark { Provider = p, Label = ProviderLabel(p), Mark = ProviderIcon(p) }); }
   return marks;
 }
 
@@ -204,6 +223,12 @@ public List<ProviderMark> ProviderMarksOf(List<string> providers) {
 public Icons MarkOf(List<ProviderMark> marks, string provider) {
   foreach (var m in marks) { if (m.Provider == provider) { return m.Mark; } }
   return Icons.Login;
+}
+
+/// What `provider`'s buttons say, from the marks a page was handed — its name for one it was not.
+public string LabelOf(List<ProviderMark> marks, string provider) {
+  foreach (var m in marks) { if (m.Provider == provider && m.Label != "") { return m.Label; } }
+  return provider;
 }
 
 /// Where a "Continue with …" button goes: the platform's provider sign-in, which comes back to `/oauth/sign-in`.

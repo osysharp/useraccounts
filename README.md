@@ -154,6 +154,12 @@ app.Accounts = new AccountsSetup {
 };
 ```
 
+On a zone, an organisation that registered its own sign-in client in Admin has it offered on its apps' sign-in pages too, after
+the app's own providers: `org:<key>`, with the label the organisation gave it ("Continue with Acme Okta") and the mark of its
+kind. Only the app's own organisation's clients are offered, only one whose secret is held in that zone, and none off a zone.
+`ProviderLabel(p)` says what a button says and `ProviderKind(p)` an `org:` client's kind; a test states them with
+`ProviderLabel.Stub(p => …)` and `ProviderKind.Stub(p => …)`, as it states what is offered with `OfferedSignInProviders.Stub`.
+
 Every "Continue with …" and "Link …" button shows its provider's mark. GitHub, Google and Microsoft have theirs built in;
 any other provider shows the plain sign-in glyph until the app gives it one, from its own icons:
 
@@ -162,6 +168,23 @@ public class DeskMarks : ProviderMarks {
   public override Icons For(string provider) { return provider == "Acme SSO" ? Icons.Acme : base.For(provider); }
 }
 ```
+
+## Sign-in only through the provider
+
+`AccountsSetup.ProviderOnly` (an organisation's lock sets it) binds the addresses on its domains to one way in. Every other
+way (a password, a reset link, a passkey, a texted code, an app's own door) is refused with "acme.com accounts sign in
+with Google.". A subdomain is bound too.
+
+- `google acme.com,acme.se`: a Google sign-in whose sealed hosted domain is one of the domains.
+- `microsoft acme.com, <tenant id>`: a Microsoft sign-in from that tenant.
+- `client:acme-okta acme.com`: only a sign-in through the organisation's own client `org:acme-okta`. When that client is
+  a google kind, the sealed hosted domain must also be one of the domains. The platform checks the client's registered
+  issuer when it mints the ticket. The refusal names the client: "acme.com accounts sign in with acme-okta.".
+  Such a rule binds the organisation's apps on its zones only. Admin runs no organisation's client, so the rule never
+  binds Admin's own sign-in.
+
+`ProviderOnlyProblem(value)` says in a sentence what is wrong with a value, or "" when it is a rule. An app's
+`SignInRules` (`SignInRulePolicy.ProviderOnly`) can add a binding but can never lift the locked one.
 
 ## Staff and their roles
 

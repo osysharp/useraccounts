@@ -27,7 +27,31 @@ app.Accounts = new AccountsSetup {
   Marks = new DeskMarks(),
   // Whose application the desk's own door has not finished — nobody's, until a test says (`DoorUnfinished`).
   OwnDoor = new DeskOwnDoor(),
+  // Nobody signs in only through a provider, until a test names a rule (`DeskProviderOnly`).
+  ProviderOnly = DeskProviderOnly(),
+  // The desk's own "which accounts sign in through a provider": NOBODY, it says — an app trying to lift its organisation's
+  // lock (review M1/D1). The lock is judged anyway (`an_app_override_cannot_unbind`). A test may have it ADD a binding of
+  // the desk's own accounts (`DeskBindsItsOwn`, `an_override_may_add_a_binding`).
+  SignInRules = new DeskOwnRules(),
 };
+
+/// An app's override of the sign-in rule: it binds nobody, unless a test stubs `DeskBindsItsOwn` — then desk.test
+/// accounts sign in with Google, on top of whatever the lock binds.
+public class DeskOwnRules : SignInRulePolicy {
+  public override ProviderRule? ProviderOnly(User account) {
+    if (DeskBindsItsOwn() && account.Email.EndsWith("@desk.test")) {
+      return new ProviderRule { Provider = "google", Domain = "desk.test", Domains = ["desk.test"] };
+    }
+    return null;
+  }
+  public override bool Waives(User account, string passkey) { return DeskWaivesPasskeys(); }
+}
+
+/// Whether the desk's own rule binds its desk.test accounts to Google — no, until a test says so.
+bool DeskBindsItsOwn() { return false; }
+
+/// Whether the desk's override waives its binding for any verified passkey (a break-glass key) — no, until a test says so.
+bool DeskWaivesPasskeys() { return false; }
 
 /// Every account may keep a number for texts on the desk, unless a test stubs `PhoneOffered`.
 public class DeskPhones : PhonePolicy {
@@ -92,6 +116,9 @@ bool SignupIsOpen() { return true; }
 
 /// The desk's logo — none, until a test that has written one names it.
 string DeskLogoUrl() { return ""; }
+
+/// The desk's "Sign-in only through the provider" rule — none, until a test names one (`google acme.test`).
+string DeskProviderOnly() { return ""; }
 
 /// Whether a sign-up proves its address before it is in — no, until a test turns it on.
 bool AddressProofRequired() { return false; }

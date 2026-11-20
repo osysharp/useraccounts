@@ -106,7 +106,15 @@ bool MustProveAddress(User account) {
 /// guard refuses at the call, before the first statement (a request's run never commits, so a refused write later on
 /// would come after the ticket was already answered). Guarded by tests/ticket-only-in-sign-in.test.osy.
 [Authorize(IsAuthenticator)]
-public SignInStep ContinueSignIn(User account) {
+public SignInStep ContinueSignIn(User account) { return ContinueSignInBy(account, NotThroughAProvider()); }
+
+/// `ContinueSignIn` for a first step that came in `via` — a provider sign-in passes the way its seal carries, and the
+/// challenge or enrolment it makes keeps it, so the ticket at the end is judged by the way this sign-in came
+/// (SECURITY-INVARIANT provider-only-on-every-door).
+[Authorize(IsAuthenticator)]
+internal SignInStep ContinueSignInBy(User account, SignInWay via) {
+  // Refused before any step is made for it — no code texted, no challenge, no enrolment — and again at the ticket (`AdmitBy`).
+  RefuseOffTheRule(account, via);
   // The address comes before the second factor, here as on the password door: an app's own door (an invitation that
   // proves nothing about the address typed, say) ends here, so without this it would hand an unproven address a ticket
   // that the kit's own `SignIn` refuses — SECURITY-INVARIANT(accounts-no-ticket-before-the-address-is-proven) holds on
@@ -117,17 +125,21 @@ public SignInStep ContinueSignIn(User account) {
   }
   if (account.TotpSecret != null) {
     var token = Security.RandomId(32);
-    new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime() };
+    DropLapsedSeals(account);
+    new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime(),
+                          PendingToken = SealToKeep(via) };
     return new SignInStep { Challenge = token, ChallengeBy = "app" };
   }
-  if (App.Setting<AccountsSetup>().SecondFactor.Required(account)) { return MustEnrol(account); }
+  if (App.Setting<AccountsSetup>().SecondFactor.Required(account)) { return MustEnrol(account, via); }
   if (TextedSecondStep(account)) {
     var token = Security.RandomId(32);
-    var challenge = new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime() };
+    DropLapsedSeals(account);
+    var challenge = new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime(),
+                                          PendingToken = SealToKeep(via) };
     TextCode(account, CodePurpose.SecondStep, NumberToText(account), challenge);
     return new SignInStep { Challenge = token, ChallengeBy = "sms", Account = MaskedPhone(NumberToText(account)) };
   }
-  return new SignInStep { Ticket = Admit(account) };
+  return new SignInStep { Ticket = AdmitBy(account, via) };
 }
 
 /// Does `account` sign in with a texted code after its password — it chose to, the app offers it, and it has a number for
@@ -137,9 +149,11 @@ bool TextedSecondStep(User account) {
 }
 
 /// The step for an account that must set two-step sign-in up before it gets a ticket: an enrolment token, and the
-/// address to label the authenticator app with.
-SignInStep MustEnrol(User account) {
-  return new SignInStep { MustEnrol = true, Enrolment = NewEnrolment(account), Account = account.Email };
+/// address to label the authenticator app with. `via` is the way this sign-in came in, kept on the enrolment so the
+/// app's sign-in rules judge it when two-step sign-in is set up; none is a sign-in not through a provider, which an app
+/// that signs in only through its provider refuses there (SECURITY-INVARIANT accounts-provider-only-at-every-door).
+SignInStep MustEnrol(User account, SignInWay? via = null) {
+  return new SignInStep { MustEnrol = true, Enrolment = NewEnrolment(account, via), Account = account.Email };
 }
 
 /// Make an account and sign it in — or, when the app requires a proven address, answer `MustVerify` (a mail with a code and
@@ -201,7 +215,7 @@ public SignInStep SignUpAtDoor(string email, string password, string name) {
   GrantNewAccountRoles(account, first);
   SendCheck(account, address, false);
   if (MustProveAddress(account)) { return new SignInStep { MustVerify = true, Account = address }; }
-  if (setup.SecondFactor.Required(account)) { return MustEnrol(account); }
+  if (setup.SecondFactor.Required(account)) { return MustEnrol(account, NotThroughAProvider()); }
   return new SignInStep { Ticket = Admit(account) };
 }
 
@@ -415,6 +429,8 @@ public string ResetPassword(string token, string password) {
 [AuthMethod]
 public string ChangePassword(string email, string currentPassword, string newPassword, string code = "") {
   var account = Verified(email, currentPassword);
+  // A fresh ticket from a password: refused for an account that signs in only through its provider.
+  RefuseOffTheRule(account, NotThroughAProvider());
   if (account.TotpSecret != null) { RequireCode(account, code); }
   var problem = PasswordProblem(newPassword, account.Email);
   if (problem != "") { throw new ValidationException(problem); }
@@ -446,6 +462,9 @@ public string ChangePassword(string email, string currentPassword, string newPas
 public string ChangeEmail(string email, string currentPassword, string newEmail, string code = "",
                           string passkeyToken = "", string passkeyResponse = "") {
   var account = ProvenOwner(email, currentPassword, code, passkeyToken, passkeyResponse);
+  // A bound account proves itself here with a password or a passkey — not through its provider — so it can't move its
+  // address off the domain the rule binds (review S4): the same refusal `ChangePassword` gives.
+  RefuseOffTheRule(account, NotThroughAProvider());
   var address = NormalisedEmail(newEmail);
   if (!LooksLikeEmail(address)) { throw new ValidationException("That does not look like an email address."); }
   if (!MayMailACheck(account, address)) { return ""; }
@@ -685,7 +704,7 @@ void StartOver(User account) {
   foreach (var key in PasskeyCredential.Where(p => p.Account == account).ToList()) { key.Delete(); }
   foreach (var ceremony in PasskeyCeremony.Where(c => c.Account == account && c.UsedAt == null).ToList()) { ceremony.UsedAt = now; }
   foreach (var code in RecoveryCode.Where(c => c.Account == account && c.UsedAt == null).ToList()) { code.UsedAt = now; }
-  foreach (var challenge in SignInChallenge.Where(c => c.Account == account && c.UsedAt == null).ToList()) { challenge.UsedAt = now; }
+  foreach (var challenge in SignInChallenge.Where(c => c.Account == account && c.UsedAt == null).ToList()) { SpendChallenge(challenge); }
   foreach (var reset in PasswordReset.Where(r => r.Account == account && r.UsedAt == null).ToList()) { reset.UsedAt = now; }
   foreach (var code in OneTimeCode.Where(c => c.Account == account && c.Purpose != CodePurpose.ProveAddress && c.UsedAt == null).ToList()) {
     code.UsedAt = now;

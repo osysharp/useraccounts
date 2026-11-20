@@ -187,7 +187,7 @@ public component SignInForm(string then = "", string email = "", string password
           Stack(gap: 2) {
             Text("or", color: Colors.TextMuted, fontSize: FontSize.Label, textAlign: TextAlign.Center);
             foreach (var p in facts.Providers) {
-              Button($"Continue with {p}", onPress: () => ContinueWith(p), size: Size.Lg) { Icon(MarkOf(facts.Marks, p), size: 18); }
+              Button($"Continue with {LabelOf(facts.Marks, p)}", onPress: () => ContinueWith(p), size: Size.Lg) { Icon(MarkOf(facts.Marks, p), size: 18); }
             }
           }
         }
@@ -914,7 +914,7 @@ public component AccountSettings() {
                     Badge("Linked", tone: Tone.Success);
                     Button("Unlink…", onPress: () => OpenUnlink(p), size: Size.Sm);
                   } else {
-                    Button($"Link {p}", onPress: () => LinkWith(p), size: Size.Sm) { Icon(MarkOf(providers.Marks, p), size: 14); }
+                    Button($"Link {LabelOf(providers.Marks, p)}", onPress: () => LinkWith(p), size: Size.Sm) { Icon(MarkOf(providers.Marks, p), size: 14); }
                   }
                 }
               }

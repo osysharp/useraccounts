@@ -1,0 +1,469 @@
+// "Sign-in only through the provider" (`AccountsSetup.ProviderOnly`), at every door the kit has — SECURITY-INVARIANT
+// provider-only-on-every-door. The desk's rule is `google acme.test`: an acme.test account is given a ticket only by
+// a Google sign-in whose seal carries acme.test. `TestOAuth.PendingToken(address, provider, "", hostedDomain)` makes the
+// seal the platform's callback would hand the provider sign-in page; the provider's type is its name, lower-case.
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void AcmeDesk() {
+  var ada = new User { Email = "ada@acme.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+                       EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = ada, Role = AppRole.Member };
+  var bo = new User { Email = "bo@desk.test", DisplayName = "Bo", PasswordHash = Security.HashPassword("battery-staple-2"),
+                      EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = bo, Role = AppRole.Member };
+  // An admin on acme.test, whom the desk requires to use two-step sign-in, who has not set it up.
+  var root = new User { Email = "root@acme.test", DisplayName = "Root", PasswordHash = Security.HashPassword("correct-horse-9"),
+                        EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = root, Role = AppRole.Admin };
+}
+
+void AcmeSignsInWithGoogle() { DeskProviderOnly.Stub(() => "google acme.test"); }
+
+string Said() { return "acme.test accounts sign in with Google."; }
+
+[Test(AcmeDesk)]
+void password_refused_when_provider_only() {
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignIn("ada@acme.test", "correct-horse-1")).Message); }
+  // …and a changed password's fresh ticket is a ticket from a password too.
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => ChangePassword("ada@acme.test", "correct-horse-1", "a-whole-new-one-1")).Message); }
+  runas (AuthBootstrap) { Assert.Null(User.Single(u => u.Email == "ada@acme.test").LastLoginAt); }
+}
+
+[Test(AcmeDesk)]
+void reset_link_refused_when_provider_only() {
+  runas (AuthBootstrap) { RequestPasswordReset("ada@acme.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@acme.test", "/reset-password/"); }
+  Assert.NotEqual("", token);
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => ResetPassword(token, "a-whole-new-one-1")).Message); }
+}
+
+[Test(AcmeDesk)]
+void passkey_refused_when_provider_only() {
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("ada@acme.test", "correct-horse-1"); }
+  runas (AuthBootstrap) {
+    AddPasskey("ada@acme.test", "", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "MacBook");
+  }
+  string handle = "";
+  runas (AuthBootstrap) { handle = PasskeyHandle(User.Single(u => u.Email == "ada@acme.test")); }
+  AcmeSignsInWithGoogle();
+  PasskeyStart start = new PasskeyStart();
+  runas (AuthBootstrap) { start = StartPasskeySignIn(); }
+  var answer = WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 1, true);
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithPasskey(start.Token, answer)).Message); }
+}
+
+[Test(AcmeDesk)]
+void code_step_keeps_the_provider_way() {
+  var totp = NewSecondFactorSetup("ada@acme.test").Key;
+  SecondFactorOn adas = new SecondFactorOn();
+  runas (AuthBootstrap) { adas = EnableSecondFactor("ada@acme.test", "correct-horse-1", totp, Totp.Code(totp)); }
+  var spare = adas.RecoveryCodes[0];
+  // Before the rule: Ada's password answers a code step, and Root's (who must set two-step sign-in up) an enrolment.
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("ada@acme.test", "correct-horse-1"); }
+  var byPassword = step.Challenge;
+  Assert.NotEqual("", byPassword);
+  runas (AuthBootstrap) { step = SignIn("root@acme.test", "correct-horse-9"); }
+  Assert.True(step.MustEnrol);
+  var enrolledByPassword = step.Enrolment;
+  AcmeSignsInWithGoogle();
+  // Through Google with Acme's domain: a code step, and the code admits — the challenge kept the way.
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "acme.test")); }
+  Assert.NotEqual("", step.Challenge);
+  Assert.Equal("", step.Ticket);
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignInWithCode(step.Challenge, Totp.Code(totp, DateTime.UtcNow.AddSeconds(30))); }
+  Assert.NotEqual("", ticket);
+  // The password's code step kept its way too: a right code (a recovery code) is refused at the ticket.
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithCode(byPassword, spare)).Message); }
+  // …and so is the password's enrolment; Google's enrolment admits.
+  var key = NewSecondFactorSetup("root@acme.test").Key;
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => EnableSecondFactor("", "", key, Totp.Code(key), enrolledByPassword)).Message); }
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("root@acme.test", "Google", "", "acme.test")); }
+  Assert.True(step.MustEnrol);
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("", "", key, Totp.Code(key), step.Enrolment); }
+  Assert.NotEqual("", on.Ticket);
+}
+
+[Test(AcmeDesk)]
+void provider_with_other_hd_is_refused() {
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "rival.test"))).Message); }
+  // A consumer Google account on the same address carries no organisation at all.
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google"))).Message); }
+}
+
+[Test(AcmeDesk)]
+void other_provider_same_domain_refused() {
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Microsoft", "", "acme.test"))).Message); }
+}
+
+[Test(AcmeDesk)]
+void provider_with_the_hd_signs_in() {
+  AcmeSignsInWithGoogle();
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "ACME.test")); }
+  Assert.NotEqual("", step.Ticket);
+  // A new acme.test person, made by the Google sign-in, is admitted the same way.
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("cy@acme.test", "Google", "", "acme.test")); }
+  Assert.NotEqual("", step.Ticket);
+}
+
+[Test(AcmeDesk)]
+void unbound_domain_signs_in_as_today() {
+  AcmeSignsInWithGoogle();
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("bo@desk.test", "battery-staple-2"); }
+  Assert.NotEqual("", step.Ticket);
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("bo@desk.test", "GitHub")); }
+  Assert.NotEqual("", step.Ticket);
+}
+
+[Test(AcmeDesk)]
+void rule_ignores_the_links_stored_domain() {
+  // Ada links Google while she is in Acme's Workspace: the link keeps acme.test.
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "acme.test")); }
+  Assert.NotEqual("", step.Ticket);
+  // She leaves it; the same Google identity now carries no organisation, and the link's acme.test is not asked.
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google"))).Message); }
+}
+
+[Test]
+void provider_only_value_checked() {
+  Assert.Equal("", ProviderOnlyProblem(""));
+  Assert.Equal("", ProviderOnlyProblem("google acme.com,acme.se"));
+  Assert.Equal("", ProviderOnlyProblem("Microsoft acme.com, 8f1d2c3b-4a5e-4f60-9a7b-0c1d2e3f4a5b"));
+  Assert.Contains("'github' is not a provider", ProviderOnlyProblem("github acme.com"));
+  Assert.Contains("'oidc' is not a provider", ProviderOnlyProblem("oidc acme.com"));
+  Assert.Contains("a space, then the domains", ProviderOnlyProblem("google"));
+  Assert.Contains("'acme' is not a domain", ProviderOnlyProblem("google acme"));
+  Assert.Contains("at least one domain", ProviderOnlyProblem("google , ,"));
+}
+
+// ── OP-IdP1b4b: the review's fixes ──
+
+[Test(AcmeDesk)]
+void an_app_override_cannot_unbind() {
+  // The desk's `SignInRules` (`DeskOwnRules`) says nobody is bound; the organisation's lock still binds Ada.
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignIn("ada@acme.test", "correct-horse-1")).Message); }
+}
+
+[Test(AcmeDesk)]
+void a_malformed_lock_refuses_every_sign_in() {
+  // A locked value this kit can't read (an `oidc` rule, which the save refuses) binds everybody, not nobody.
+  DeskProviderOnly.Stub(() => "oidc acme.test");
+  runas (AuthBootstrap) { Assert.Contains("not possible here", Assert.Throws<ValidationException>(() => SignIn("bo@desk.test", "battery-staple-2")).Message); }
+  runas (AuthBootstrap) { Assert.Contains("not possible here", Assert.Throws<ValidationException>(() => SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "acme.test"))).Message); }
+}
+
+[Test(AcmeDesk)]
+void a_subdomain_address_is_bound() {
+  runas (AuthBootstrap) {
+    new User { Email = "eu@eu.acme.test", DisplayName = "Eu", PasswordHash = Security.HashPassword("correct-horse-3"), EmailVerifiedAt = DateTime.UtcNow };
+    new User { Email = "dot@acme.test.", DisplayName = "Dot", PasswordHash = Security.HashPassword("correct-horse-4"), EmailVerifiedAt = DateTime.UtcNow };
+    new User { Email = "eve@acme.test.evil.test", DisplayName = "Eve", PasswordHash = Security.HashPassword("correct-horse-5"), EmailVerifiedAt = DateTime.UtcNow };
+  }
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignIn("eu@eu.acme.test", "correct-horse-3")).Message); }
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignIn("dot@acme.test.", "correct-horse-4")).Message); }
+  // A look-alike is not Acme's: unbound.
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("eve@acme.test.evil.test", "correct-horse-5"); }
+  Assert.NotEqual("", step.Ticket);
+  // The subdomain's person through Google with Acme's (primary) hosted domain signs in.
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("eu@eu.acme.test", "Google", "", "acme.test")); }
+  Assert.NotEqual("", step.Ticket);
+}
+
+[Test(AcmeDesk)]
+void a_bound_account_cannot_move_its_address() {
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => ChangeEmail("ada@acme.test", "correct-horse-1", "ada@elsewhere.test")).Message); }
+  runas (AuthBootstrap) { Assert.Equal("ada@acme.test", User.Single(u => u.DisplayName == "Ada").Email); }
+}
+
+[Test(AcmeDesk)]
+void sign_up_refused_when_provider_only() {
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignUp("cy@acme.test", "a-long-password-1", "Cy")).Message); }
+  runas (AuthBootstrap) { Assert.False(User.Any(u => u.Email == "cy@acme.test")); }
+}
+
+[Test(AcmeDesk)]
+void remove_password_refused_when_provider_only() {
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("ada@acme.test", "correct-horse-1"); }
+  runas (AuthBootstrap) {
+    AddPasskey("ada@acme.test", "", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "MacBook");
+  }
+  string handle = "";
+  runas (AuthBootstrap) { handle = PasskeyHandle(User.Single(u => u.Email == "ada@acme.test")); }
+  AcmeSignsInWithGoogle();
+  // Turning the password off with the passkey is refused: its fresh ticket is not Google's.
+  PasskeyStart start = new PasskeyStart();
+  runas (AuthBootstrap) { start = StartPasskeySignIn(); }
+  var answer = WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 1, true);
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => RemovePassword("ada@acme.test", start.Token, answer)).Message); }
+}
+
+[Test(AcmeDesk)]
+void passkey_enrolment_keeps_the_password_way() {
+  // Root (who must set two-step sign-in up) is sent to enrol by a password sign-in before the rule…
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("root@acme.test", "correct-horse-9"); }
+  Assert.True(step.MustEnrol);
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("", "", "", "", "", step.Enrolment); }
+  AcmeSignsInWithGoogle();
+  // …so the passkey enrolment that finishes it admits with the password's way, and is refused.
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => AddPasskey("", "", "", "", "", step.Enrolment, first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "MacBook")).Message); }
+}
+
+// ── OP-IdP1b4c: the doors 4b left untested, and an override that adds ──
+
+[Test(AcmeDesk)]
+void an_override_may_add_a_binding() {
+  // The desk's own rule binds its desk.test accounts to Google, on top of the lock: Bo's password is refused…
+  DeskBindsItsOwn.Stub(() => true);
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal("desk.test accounts sign in with Google.", Assert.Throws<ValidationException>(() => SignIn("bo@desk.test", "battery-staple-2")).Message); }
+  // …Google with the desk's hosted domain admits him, and the lock still binds Ada.
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("bo@desk.test", "Google", "", "desk.test")); }
+  Assert.NotEqual("", step.Ticket);
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignIn("ada@acme.test", "correct-horse-1")).Message); }
+}
+
+[Test(AcmeDesk)]
+void phone_code_refused_when_provider_only() {
+  // Ada proves a number before the rule; the rule then refuses the code texted to it at the ticket.
+  runas (AuthBootstrap) { ProvePhone("ada@acme.test", "correct-horse-1", "+46700000011"); }
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000011"); }
+  runas (AuthBootstrap) { ProvePhone("ada@acme.test", "correct-horse-1", "+46700000011", code); }
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { SignInWithPhone("+46700000011"); }
+  runas (AuthBootstrap) { code = TextedCode("+46700000011"); }
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithPhone("+46700000011", code)).Message); }
+  runas (AuthBootstrap) { Assert.Null(User.Single(u => u.Email == "ada@acme.test").LastLoginAt); }
+}
+
+[Test(AcmeDesk)]
+void door_code_refused_when_provider_only() {
+  // The mailed door code proves the address; the app's door then continues the sign-in, which is "no provider".
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { MailDoorCode("ada@acme.test"); }
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("ada@acme.test"); }
+  Assert.Equal(6, code.Length);
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => ContinueSignIn(ProveDoorCode("ada@acme.test", code))).Message); }
+}
+
+[Test(AcmeDesk)]
+void verify_email_code_refused_when_provider_only() {
+  // Cy signs up before the rule; the code her mail carried would sign her in, and under the rule it is refused.
+  runas (AuthBootstrap) { SignUp("cy@acme.test", "a-long-password-1", "Cy"); }
+  string code = "";
+  runas (AuthBootstrap) { code = CodeIn("cy@acme.test"); }
+  Assert.Equal(6, code.Length);
+  AcmeSignsInWithGoogle();
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => VerifyEmailCode("cy@acme.test", code, "a-long-password-1")).Message); }
+}
+
+[Test(AcmeDesk)]
+void texted_step_keeps_the_way_of_the_first() {
+  // Ada proves a number and makes a texted code her second step, before the rule.
+  runas (AuthBootstrap) { ProvePhone("ada@acme.test", "correct-horse-1", "+46700000012"); }
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000012"); }
+  runas (AuthBootstrap) { ProvePhone("ada@acme.test", "correct-horse-1", "+46700000012", code); }
+  runas (AuthBootstrap) { SetSmsSecondStep("ada@acme.test", "correct-horse-1", true); }
+  SignInStep byPassword = new SignInStep();
+  runas (AuthBootstrap) { byPassword = SignIn("ada@acme.test", "correct-horse-1"); }
+  Assert.Equal("sms", byPassword.ChallengeBy);
+  runas (AuthBootstrap) { code = TextedCode("+46700000012"); }
+  AcmeSignsInWithGoogle();
+  // The password's texted step: the right code is refused at the ticket.
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithCode(byPassword.Challenge, code)).Message); }
+  // Google with Acme's domain: a texted step, and its code admits.
+  SignInStep byGoogle = new SignInStep();
+  runas (AuthBootstrap) { byGoogle = SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "acme.test")); }
+  Assert.Equal("sms", byGoogle.ChallengeBy);
+  runas (AuthBootstrap) { code = TextedCode("+46700000012"); }
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignInWithCode(byGoogle.Challenge, code); }
+  Assert.NotEqual("", ticket);
+}
+
+// ── OP-IdP1b5: the challenge keeps the pending TOKEN (review N2), and a password-proved link is judged (review N1). ──
+
+// One account that may reset a second step (and so read challenge rows), and is not the sign-in flow: the column's own
+// `deny read` is what keeps the token from it.
+policy ResetsSecondFactor => User.Any(u => u == user && u.Email == "reset@acme.test");
+principal Resetter => User.Single(u => u.Email == "reset@acme.test");
+principal AcmeAda => User.Single(u => u.Email == "ada@acme.test");
+
+[TestFixture(AcmeDesk)]
+void AcmeWithAResetDesk() { new User { Email = "reset@acme.test", DisplayName = "Reset desk", EmailVerifiedAt = DateTime.UtcNow }; }
+
+[Test(AcmeWithAResetDesk)]
+void the_challenge_token_is_unreadable() {
+  var key = NewSecondFactorSetup("ada@acme.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@acme.test", "correct-horse-1", key, Totp.Code(key, DateTime.UtcNow)); }
+  AcmeSignsInWithGoogle();
+  SignInStep first = new SignInStep();
+  runas (AuthBootstrap) { first = SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "acme.test")); }
+  Assert.Equal("app", first.ChallengeBy);
+  var hash = TokenHash(first.Challenge);
+  // The sign-in flow holds the token — without which the nulls below prove nothing…
+  runas (AuthBootstrap) { Assert.NotNull(SignInChallenge.Single(c => c.TokenHash == hash).PendingToken); }
+  // …a reader of the rows does not, by a query or a filter on it…
+  runas (Resetter) {
+    Assert.Equal(1, SignInChallenge.Count(c => c.Account.Email == "ada@acme.test" && c.UsedAt == null));
+    Assert.Null(SignInChallenge.Single(c => c.Account.Email == "ada@acme.test" && c.UsedAt == null).PendingToken);
+  }
+  // …nor the account itself.
+  runas (AcmeAda) { Assert.Equal(0, SignInChallenge.Count(c => c.PendingToken != null)); }
+  // Spent: the code admits, and the token is gone.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithCode(first.Challenge, Totp.Code(key, DateTime.UtcNow.AddSeconds(30)))); }
+  runas (AuthBootstrap) { Assert.Null(SignInChallenge.Single(c => c.TokenHash == hash).PendingToken); }
+  // Lapsed: a challenge presented after its five minutes is refused, and its token is gone.
+  SignInStep second = new SignInStep();
+  runas (AuthBootstrap) { second = SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "acme.test")); }
+  var lapsed = TokenHash(second.Challenge);
+  runas (AuthBootstrap) { Assert.NotNull(SignInChallenge.Single(c => c.TokenHash == lapsed).PendingToken); }
+  TestClock.Set(DateTime.UtcNow.AddMinutes(6));
+  runas (AuthBootstrap) { Assert.Throws<ValidationException>(() => SignInWithCode(second.Challenge, Totp.Code(key, DateTime.UtcNow))); }
+  runas (AuthBootstrap) { Assert.Null(SignInChallenge.Single(c => c.TokenHash == lapsed).PendingToken); }
+}
+
+[Test(AcmeDesk)]
+void an_insiders_seal_links_nothing_in_the_kit() {
+  AcmeSignsInWithGoogle();
+  // Mallory, a real Acme member, holds Ada's password and her own Acme Google seal.
+  var mallorys = TestOAuth.PendingToken("mallory@acme.test", "Google", "", "acme.test");
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => LinkProvider("ada@acme.test", "correct-horse-1", mallorys)).Message); }
+  runas (AuthBootstrap) { Assert.Equal(0, Security.OAuthLinkedProviders(User.Single(u => u.Email == "ada@acme.test").Id).Count); }
+}
+
+/// Gives `email` (password `password`) a passkey made while no rule binds it, and answers a sign-in answer for it.
+string PasskeyAnswerFor(string email, string password, PasskeyStart start) {
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey(email, password); }
+  runas (AuthBootstrap) {
+    AddPasskey(email, "", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "YubiKey");
+  }
+  string handle = "";
+  runas (AuthBootstrap) { handle = PasskeyHandle(User.Single(u => u.Email == email)); }
+  return WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 1, true);
+}
+
+[Test(AcmeDesk)]
+void a_waived_passkey_opens_an_added_binding() {
+  // OP-IdP1d: the desk's override binds Bo, and waives its binding for a verified passkey (Admin's break-glass key).
+  PasskeyStart start = new PasskeyStart();
+  runas (AuthBootstrap) { start = StartPasskeySignIn(); }
+  var answer = PasskeyAnswerFor("bo@desk.test", "battery-staple-2", start);
+  DeskBindsItsOwn.Stub(() => true);
+  DeskWaivesPasskeys.Stub(() => true);
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithPasskey(start.Token, answer); }
+  Assert.NotEqual("", step.Ticket);
+}
+
+[Test(AcmeDesk)]
+void break_glass_does_not_open_an_org_app() {
+  // OP-IdP1d: one person, one break-glass passkey. Where only Admin's override binds Bo (the desk standing in for Admin), the
+  // waiver opens it; where his organisation's LOCK binds him (an organisation's app), the same waiver opens nothing.
+  PasskeyStart toAdmin = new PasskeyStart();
+  PasskeyStart toTheApp = new PasskeyStart();
+  runas (AuthBootstrap) { toAdmin = StartPasskeySignIn(); toTheApp = StartPasskeySignIn(); }
+  var intoAdmin = PasskeyAnswerFor("bo@desk.test", "battery-staple-2", toAdmin);
+  var intoTheApp = PasskeyAnswerFor("bo@desk.test", "battery-staple-2", toTheApp);
+  DeskBindsItsOwn.Stub(() => true);
+  DeskWaivesPasskeys.Stub(() => true);
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithPasskey(toAdmin.Token, intoAdmin); }
+  Assert.NotEqual("", step.Ticket);
+  DeskProviderOnly.Stub(() => "google desk.test");
+  runas (AuthBootstrap) {
+    Assert.Equal("desk.test accounts sign in with Google.", Assert.Throws<ValidationException>(() => SignInWithPasskey(toTheApp.Token, intoTheApp)).Message);
+  }
+}
+
+[Test(AcmeDesk)]
+void a_password_is_never_waived() {
+  // The waiver is asked only for a passkey: Bo's password stays bound by the override.
+  DeskBindsItsOwn.Stub(() => true);
+  DeskWaivesPasskeys.Stub(() => true);
+  runas (AuthBootstrap) { Assert.Equal("desk.test accounts sign in with Google.", Assert.Throws<ValidationException>(() => SignIn("bo@desk.test", "battery-staple-2")).Message); }
+}
+
+[Test(AcmeDesk)]
+void the_lock_beats_a_break_glass_passkey() {
+  // The organisation's LOCK binds Ada; the desk's override waives every passkey. The lock is never waived.
+  PasskeyStart start = new PasskeyStart();
+  runas (AuthBootstrap) { start = StartPasskeySignIn(); }
+  var answer = PasskeyAnswerFor("ada@acme.test", "correct-horse-1", start);
+  AcmeSignsInWithGoogle();
+  DeskWaivesPasskeys.Stub(() => true);
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithPasskey(start.Token, answer)).Message); }
+}
+
+// ── ORGPOL OP-OC1c1-2: a rule that names the organisation's own client (`client:<key> <domain>[,…]`) ──
+// The seal's client name is `org:<key>` for an organisation's client; the issuer is judged at the platform's mint.
+
+void AcmeSignsInWithItsOkta() { DeskProviderOnly.Stub(() => "client:acme-okta acme.test"); }
+
+[Test]
+void a_client_rule_value_is_checked() {
+  Assert.Equal("", ProviderOnlyProblem("client:acme-okta acme.test,acme.se"));
+  Assert.Equal("", ProviderOnlyProblem("Client:Acme-Okta acme.test"));
+  Assert.Contains("'acme_okta' is not a client key", ProviderOnlyProblem("client:acme_okta acme.test"));
+  Assert.Contains("'' is not a client key", ProviderOnlyProblem("client: acme.test"));
+  Assert.Contains("is not a domain", ProviderOnlyProblem("client:acme-okta 8f1d2c3b-4a5e-4f60-9a7b-0c1d2e3f4a5b"));
+}
+
+[Test(AcmeDesk)]
+void a_client_rule_admits_only_its_client() {
+  AcmeSignsInWithItsOkta();
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "org:acme-okta")); }
+  Assert.NotEqual("", step.Ticket);
+  var said = "acme.test accounts sign in with acme-okta.";
+  // Another of the organisation's clients, Google with Acme's own Workspace, and a password are each refused.
+  runas (AuthBootstrap) { Assert.Equal(said, Assert.Throws<ValidationException>(() => SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "org:rival-okta"))).Message); }
+  runas (AuthBootstrap) { Assert.Equal(said, Assert.Throws<ValidationException>(() => SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "acme.test"))).Message); }
+  runas (AuthBootstrap) { Assert.Equal(said, Assert.Throws<ValidationException>(() => SignIn("ada@acme.test", "correct-horse-1")).Message); }
+  // An address the rule does not list signs in as today.
+  runas (AuthBootstrap) { step = SignIn("bo@desk.test", "battery-staple-2"); }
+  Assert.NotEqual("", step.Ticket);
+}
+
+/// `MustEnrol(account)` with no way — the form the kit offered before the way was kept — is a sign-in not through a
+/// provider: under the rule its enrolment is refused when two-step sign-in is set up, as a password's is.
+[Test(AcmeDesk)]
+void an_enrolment_made_without_a_way_is_refused_under_the_rule() {
+  AcmeSignsInWithGoogle();
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = MustEnrol(User.Single(u => u.Email == "root@acme.test")); }
+  Assert.True(step.MustEnrol);
+  var key = NewSecondFactorSetup("root@acme.test").Key;
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => EnableSecondFactor("", "", key, Totp.Code(key), step.Enrolment)).Message); }
+}

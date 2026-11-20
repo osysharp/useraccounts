@@ -166,17 +166,17 @@ public class AccountsSetup {
   /// The app's name as a person knows it — on the pages and in the mail.
   public string AppName = "";
   /// Whether a visitor may make an account. Closed, accounts come from an operator (`osy user add`) or an invitation.
-  [OrgPolicy(OrgPolicyMode.Lock)] public bool SignupOpen = true;
+  [OrgPolicy(OrgPolicyMode.Lock, Name = "Open sign-up")] public bool SignupOpen = true;
   /// The role a new account is given — the app's own. None: no role, which is often right for the public.
   public role? SignupRole = null;
   /// The role the FIRST account ever made is given too — whoever sets the app up runs it.
   public role? FirstAccountRole = null;
   /// The shortest password accepted. Length is what costs an attacker guesses; a demand for symbols mostly produces
   /// `Passw0rd!`, so there is none.
-  [OrgPolicy(OrgPolicyMode.Range)] public int MinPasswordLength = 10;
+  [OrgPolicy(OrgPolicyMode.Range, Name = "Shortest password (characters)")] public int MinPasswordLength = 10;
   /// Refuse to sign in an account whose address has not been proven. Off by default: a mail outage must not become an
   /// outage of the app.
-  [OrgPolicy(OrgPolicyMode.Lock)] public bool RequireVerifiedEmail = false;
+  [OrgPolicy(OrgPolicyMode.Lock, Name = "Verified email before sign-in")] public bool RequireVerifiedEmail = false;
   /// Whose address must be proven before they are signed in, when not everybody's must — derive and override `Required`
   /// to say who (e.g. the public, while the team that runs the app signs in at once). `RequireVerifiedEmail` on asks it of
   /// everybody whatever this says.
@@ -205,10 +205,25 @@ public class AccountsSetup {
   public PhonePolicy Phone = new PhonePolicy();
   /// A proven number may sign in with a texted code in place of the password. Off by default: whoever takes over a number
   /// (a SIM swap, a port-out) could then sign in with it — choose it where that trade is right for the app's people.
-  [OrgPolicy(OrgPolicyMode.Lock)] public bool SmsSignIn = false;
+  [OrgPolicy(OrgPolicyMode.Lock, Name = "Sign-in with a texted code")] public bool SmsSignIn = false;
   /// An account may choose a texted code as its second step after the password. Off by default. ⚠ Never the factor
   /// `SecondFactor.Required` asks for: an account the app requires a second factor of is asked for an authenticator app.
-  [OrgPolicy(OrgPolicyMode.Lock)] public bool SmsSecondStep = false;
+  [OrgPolicy(OrgPolicyMode.Lock, Name = "Texted code as a second step")] public bool SmsSecondStep = false;
+  /// Accounts on these domains sign in only through this provider: `<provider> <domain>[,<domain>…]`, e.g.
+  /// `google acme.com,acme.se`. The provider is google or microsoft. An account whose address is on a listed domain gets
+  /// a ticket only from a sign-in through that provider whose seal carries one of the listed values — a password, a reset
+  /// link, a passkey or a texted code is refused. Google seals the Workspace's PRIMARY domain (a person on an alias or
+  /// secondary domain carries the primary one), so list the primary domain too. Microsoft seals the tenant id, never a
+  /// domain: list the tenant id (configured, never inferred) beside the domains; a guest in the tenant carries none. A
+  /// provider that has not verified the address seals no organisation either — an Entra tenant that sends no `email`
+  /// claim reads none for everyone, and is refused. A bound person's step after the provider (a two-step code, or
+  /// setting two-step sign-in up) reopens that sign-in's seal, so it lasts only as long as the seal: 10 minutes. Past that
+  /// the step is refused and the person signs in through the provider again (fail closed). Empty by default: nobody is
+  /// bound. Read through `SignInRules`. Today the provider is reached through the application's own sign-in clients; an
+  /// organisation's own registered client comes next (IdP1c), so no one application's client is the model.
+  [OrgPolicy(OrgPolicyMode.Lock, Name = "Sign-in only through the provider")] public string ProviderOnly = "";
+  /// Which accounts must sign in through a provider — by default `ProviderOnly` says (see `SignInRulePolicy`).
+  public SignInRulePolicy SignInRules = new SignInRulePolicy();
   /// The app's mark on every sign-in screen, above its name — an address the browser fetches: a file the app keeps
   /// (`File.Url("public/brand/logo.svg")`) or an https address. None by default: the screens show the name alone. A
   /// `data:` address is not drawn — the platform keeps them out of every page.
