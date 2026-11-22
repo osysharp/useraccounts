@@ -127,9 +127,10 @@ public component SignInForm(string then = "", string email = "", string password
   action SubmitCode() {
     problem = "";
     try {
-      var ticket = SignInWithCode(challenge, code);
-      if (ticket == "") { problem = "That code is not right — type the newest one your app shows."; code = ""; return; }
-      Session.SignIn(ticket, then != "" ? then : facts.HomePath);
+      var step = SignInWithCode(challenge, code);
+      if (step.Ticket == "" && !step.MustEnrol) { problem = "That code is not right — type the newest one your app shows."; code = ""; return; }
+      challenge = ""; code = "";
+      Take(step);
     }
     catch (Exception ex) { problem = ex.Message; challenge = ""; secret = ""; }
   }
@@ -1077,7 +1078,7 @@ public component SecondFactorCodeStep(string challenge, string then) {
   action SubmitCode() {
     problem = "";
     try {
-      var ticket = SignInWithCode(challenge, code);
+      var ticket = SignInWithCode(challenge, code).Ticket;
       if (ticket == "") { problem = "That code is not right — type the newest one your app shows."; code = ""; return; }
       Session.SignIn(ticket, then);
     }

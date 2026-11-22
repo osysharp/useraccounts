@@ -48,10 +48,10 @@ public entity PasskeyCredential {
     deny update Account when !IsAuthenticator;
     deny update CredentialId when !IsAuthenticator;
     deny update PublicKey when !IsAuthenticator;
-    deny update SignCount when !IsAuthenticator;
+    deny update SignCount when !IsAuthenticator except via ProvePresence;
     deny update BackedUp when !IsAuthenticator;
     deny update CreatedAt when !IsAuthenticator;
-    deny update LastUsedAt when !IsAuthenticator;
+    deny update LastUsedAt when !IsAuthenticator except via ProvePresence;
   }
 }
 
@@ -60,17 +60,29 @@ public entity PasskeyCredential {
 /// SECURITY-INVARIANT(accounts-passkey-challenge-single-use-expiring): every passkey answer is checked against a
 /// challenge the sign-in flow minted (`StartPasskeySignIn`, `AddPasskey`), kept only as its hash, alive for five
 /// minutes, and spent by the first answer that comes back for it — right or wrong — so a captured answer cannot be
-/// replayed, and an add ceremony is never accepted as a sign-in (nor the other way round). Guarded by
-/// tests/passkeys.test.osy.
+/// replayed, and an add ceremony is never accepted as a sign-in (nor the other way round). A presence ceremony
+/// (`StartPresence`, its `ActHash` set) is never a sign-in or a confirmation, and those are never presence
+/// (SECURITY-INVARIANT presence-proof-is-single-use-and-bound-to-its-act). Guarded by tests/passkeys.test.osy and
+/// tests/presence.test.osy.
 public entity PasskeyCeremony {
   [Required, Unique, MaxLength(64)] string TokenHash;
-  /// The account an ADD is for, proven when it started. Null for a sign-in or a confirmation: the passkey that answers
-  /// says whose it is.
+  /// The account an ADD or a PRESENCE is for, signed in or proven when it started. Null for a sign-in or a confirmation:
+  /// the passkey that answers says whose it is.
   User? Account;
   bool ForAdd = false;
+  /// The act a presence ceremony is for (`PresenceActHash`); null for every other ceremony.
+  [MaxLength(64)] string? ActHash;
   [Required] DateTime ExpiresAt;
   DateTime? UsedAt;
-  security { allow read, create, update, delete when IsAuthenticator; }
+  security {
+    allow read, create, update, delete when IsAuthenticator;
+    // A presence runs as the signed-in account: it starts and spends its own presence ceremonies, and sees no other.
+    allow read when IsAuthenticated where Account == user && ActHash != null;
+    allow create when IsAuthenticated where Account == user && ActHash != null && !ForAdd && UsedAt == null;
+    allow update UsedAt when IsAuthenticated where Account == user && ActHash != null;
+    deny create when !IsAuthenticator except via StartPresence;
+    deny update UsedAt when !IsAuthenticator except via ProvePresence;
+  }
 }
 
 /// What a passkey ceremony starts with: the challenge `Token` to hand back with the answer, and the `Options` for the
@@ -126,6 +138,102 @@ public PasskeyStart StartPasskeySignIn() {
   return new PasskeyStart { Token = token, Options = WebAuthn.RequestOptions(token, PasskeySite(), []) };
 }
 
+/// Start proving that the signed-in person is here, with one of their passkeys, for `act` (an approval, a seat given — what
+/// the caller asks it for). Answers the token and the options for `Passkey.Get`: they offer only this account's passkeys and
+/// require the device to check who holds it (`userVerification: "required"`). Hand both to `ProvePresence`.
+[Server, Authorize(IsAuthenticated)]
+public PasskeyStart StartPresence(string act) {
+  var me = Me();
+  if (me == null) { throw new ValidationException("Sign in first."); }
+  RefuseAnUnfitAct(act);
+  var held = PasskeyCredential.Where(p => p.Account == me).Select(p => p.CredentialId).ToList();
+  if (held.Count == 0) { throw new ValidationException("This account has no passkey — approve with your password and current code."); }
+  var token = Security.RandomId(32);
+  new PasskeyCeremony { TokenHash = TokenHash(token), Account = me, ActHash = PresenceActHash(act),
+                        ExpiresAt = DateTime.UtcNow + PresenceLifetime() };
+  UnitOfWork.Commit();
+  return new PasskeyStart { Token = token, Options = WebAuthn.RequestOptions(token, PasskeySite(), held) };
+}
+
+/// Prove that the signed-in person is here, for `act`: a passkey answer (`passkeyToken` + `passkeyResponse`, a ceremony
+/// `StartPresence` began for this account and this act), or the account's password and the current code of its
+/// authenticator app. Answers a proof for `TakePresence`, good once within five minutes. Throws the sentence to show. Every
+/// wrong password, code or passkey counts toward the account's lockout. A texted or mailed code, a recovery code, a provider
+/// and a ticket's claims prove nothing here.
+[Server, Authorize(IsAuthenticated)]
+public string ProvePresence(string act, string passkeyToken = "", string passkeyResponse = "", string password = "",
+                            string code = "") {
+  var me = Me();
+  if (me == null) { throw new ValidationException("Sign in first."); }
+  RefuseAnUnfitAct(act);
+  RefuseWhenLockedOut(me);
+  var now = DateTime.UtcNow;
+  var actHash = PresenceActHash(act);
+  var way = "";
+  if (passkeyResponse != "") {
+    var ceremony = PasskeyCeremony.FirstOrDefault(c => c.TokenHash == TokenHash(passkeyToken));
+    if (ceremony == null || ceremony.ActHash != actHash || ceremony.Account == null || ceremony.Account.Id != me.Id
+        || ceremony.UsedAt != null || ceremony.ExpiresAt < now) {
+      throw new ValidationException(PresenceCeremonyLapsed());
+    }
+    // Spent now, whatever the answer (SECURITY-INVARIANT accounts-passkey-challenge-single-use-expiring).
+    ceremony.UsedAt = now;
+    UnitOfWork.Commit();
+    var id = WebAuthn.CredentialId(passkeyResponse);
+    var key = id == "" ? null : PasskeyCredential.FirstOrDefault(p => p.CredentialId == id && p.Account == me);
+    if (key == null) {
+      new SecondFactorMiss { Account = me, At = DateTime.UtcNow };
+      UnitOfWork.Commit();
+      throw new ValidationException("That passkey is not one of this account's.");
+    }
+    long count = -1;
+    var refusal = "";
+    try { count = WebAuthn.Verify(passkeyResponse, key.PublicKey, key.SignCount, passkeyToken, PasskeyOrigin(), PasskeySite(), PasskeyHandle(me)); }
+    catch (ValidationException e) { refusal = e.Message; }
+    if (refusal != "") {
+      new SecondFactorMiss { Account = me, At = DateTime.UtcNow };
+      UnitOfWork.Commit();
+      throw new ValidationException(refusal);
+    }
+    key.SignCount = count;
+    key.LastUsedAt = now;
+    way = "passkey";
+  } else {
+    if (!PresencePasswordFits(password)) {
+      new SecondFactorMiss { Account = me, At = DateTime.UtcNow };
+      UnitOfWork.Commit();
+      throw new ValidationException("That is not your current password.");
+    }
+    var step = PresenceCodeStep(code);
+    if (step == -2) {
+      if (PasskeyCredential.Any(p => p.Account == me)) { throw new ValidationException("This account has no authenticator app — approve with your passkey."); }
+      throw new ValidationException("Add a passkey or two-step sign-in to approve deploys.");
+    }
+    if (code.Trim() == "") { throw new ValidationException("Type the current code from your authenticator app as well."); }
+    if (step < 0) {
+      new SecondFactorMiss { Account = me, At = DateTime.UtcNow };
+      UnitOfWork.Commit();
+      throw new ValidationException("That code is not right — type the newest code your app shows.");
+    }
+    me.TotpLastStep = step;
+    way = "app";
+  }
+  if (!StepCountsAsPresence(way)) { throw new ValidationException("Add a passkey or two-step sign-in to approve deploys."); }
+  DropSpentPresence();
+  var proof = Security.RandomId(32);
+  new PresenceProof { Account = me, ActHash = actHash, TokenHash = TokenHash(proof), Way = way, ExpiresAt = now + PresenceLifetime() };
+  UnitOfWork.Commit();
+  return proof;
+}
+
+/// The sentence for a presence answer to no live presence ceremony of this account and act.
+string PresenceCeremonyLapsed() { return "That confirmation has expired — start again."; }
+
+/// Throws for an act presence is not proven for: none, or longer than `PresenceActLength`.
+void RefuseAnUnfitAct(string act) {
+  if (act.Trim() == "" || act.Length > PresenceActLength()) { throw new ValidationException("That is not something presence is proven for."); }
+}
+
 /// Sign in with a passkey: the token `StartPasskeySignIn` answered and the browser's answer (`Passkey.Get`). Answers a
 /// `SignInStep` — a ticket; or `MustVerify` when the app requires a proven address and this one is not. A passkey is
 /// both steps at once, so no code follows it. Throws the sentence to show when the passkey is not one of an account
@@ -144,7 +252,7 @@ public SignInStep SignInWithPasskey(string token, string response) {
     return new SignInStep { MustVerify = true, Account = account.Email };
   }
   // Through no provider, with the verified key named, so an app's override may waive ITS binding for it (never the lock).
-  return new SignInStep { Ticket = AdmitBy(account, new SignInWay { Passkey = key.CredentialId }) };
+  return new SignInStep { Ticket = AdmitBy(account, new SignInWay { Passkey = key.CredentialId, SecondStep = "passkey" }) };
 }
 
 /// Add a passkey to the account `email` names — in two halves, as a browser needs. First (no `addToken`), proof that it
@@ -160,7 +268,7 @@ public PasskeyAdding AddPasskey(string email, string password = "", string code 
                                 string addResponse = "", string name = "") {
   var now = DateTime.UtcNow;
   if (addToken == "") {
-    var owner = enrolment != "" ? Enrolling(enrolment) : ProvenOwner(email, password, code, passkeyToken, passkeyResponse);
+    var owner = enrolment != "" ? Enrolling(enrolment) : ProvenPastAFactor(email, password, code, passkeyToken, passkeyResponse);
     if (PasskeyCredential.Count(p => p.Account == owner) >= PasskeysAllowed()) {
       throw new ValidationException($"An account may have {PasskeysAllowed()} passkeys — remove one you no longer use first.");
     }
@@ -197,12 +305,18 @@ public PasskeyAdding AddPasskey(string email, string password = "", string code 
                           SignCount = made.SignCount, BackedUp = made.BackedUp, Name = label.Length > 80 ? label.Substring(0, 80) : label,
                           CreatedAt = now };
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasskeyAdded(account, label));
-  if (enrolment != "") { ticket = AdmitBy(account, via); }
+  if (enrolment != "") {
+    // The passkey just made is this sign-in's second step.
+    via.SecondStep = "passkey";
+    ticket = AdmitBy(account, via);
+  }
   return new PasskeyAdding { Ticket = ticket };
 }
 
-/// Remove the passkey `credentialId` from the account `email` names, given the same proof `AddPasskey` takes. Answers "",
-/// or throws the sentence to show. The owner is told by mail.
+/// Remove the passkey `credentialId` from the account `email` names, given the same proof `AddPasskey` takes: one of its
+/// passkeys (this one or another), or the password and the authenticator's code — never the password alone
+/// (SECURITY-INVARIANT accounts-a-factor-is-added-only-past-a-factor). Answers "", or throws the sentence to show. The owner
+/// is told by mail.
 ///
 /// SECURITY-INVARIANT(accounts-the-last-way-in-is-never-removed): a passkey is removed only while the account keeps
 /// another way in — a password, another passkey, or a linked provider — and the password only while it keeps a passkey
@@ -211,7 +325,7 @@ public PasskeyAdding AddPasskey(string email, string password = "", string code 
 [AuthMethod]
 public string RemovePasskey(string email, string credentialId, string password = "", string code = "", string passkeyToken = "",
                             string passkeyResponse = "") {
-  var account = ProvenOwner(email, password, code, passkeyToken, passkeyResponse);
+  var account = ProvenPastAFactor(email, password, code, passkeyToken, passkeyResponse);
   var key = PasskeyCredential.FirstOrDefault(p => p.Account == account && p.CredentialId == credentialId);
   if (key == null) { throw new ValidationException("That passkey is not on your account."); }
   if (WaysIn(account) <= 1) {
@@ -245,8 +359,12 @@ public string RemovePassword(string email, string passkeyToken, string passkeyRe
   foreach (var reset in PasswordReset.Where(r => r.Account == account && r.UsedAt == null).ToList()) { reset.UsedAt = now; }
   // SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change): a change of the account's way in.
   Security.EndOtherSessions(account.Id);
+  EndPresenceOf(account.Id);
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasswordRemoved(account));
-  return Security.IssueJwt(account.Id, account.Email);
+  // Confirmed with a passkey just now: that is this fresh ticket's second step.
+  var via = NotThroughAProvider();
+  via.SecondStep = "passkey";
+  return Mint(account, via);
 }
 
 /// Rename one of the signed-in account's passkeys. Runs as the account: it may rename only its own.
@@ -304,7 +422,7 @@ int WaysIn(User account) {
 PasskeyCredential Asserted(string token, string response) {
   var now = DateTime.UtcNow;
   var ceremony = PasskeyCeremony.FirstOrDefault(c => c.TokenHash == TokenHash(token));
-  if (ceremony == null || ceremony.ForAdd || ceremony.UsedAt != null || ceremony.ExpiresAt < now) {
+  if (ceremony == null || ceremony.ForAdd || ceremony.ActHash != null || ceremony.UsedAt != null || ceremony.ExpiresAt < now) {
     throw new ValidationException("That passkey sign-in has expired — start again.");
   }
   ceremony.UsedAt = now;
@@ -331,5 +449,16 @@ User ProvenOwner(string email, string password, string code, string passkeyToken
   }
   var account = Verified(email, password);
   if (account.TotpSecret != null) { RequireCode(account, code); }
+  return account;
+}
+
+/// `ProvenOwner`, where a factor is added or removed: the password alone is refused for an account that holds a second
+/// factor or a texted step, which is asked instead — one of its passkeys, or the authenticator's code (SECURITY-INVARIANT
+/// accounts-a-factor-is-added-only-past-a-factor). The one proof a function that writes a factor goes through, but for the
+/// enrolment of an account with none (`Enrolling`) and the few that Platform.Tests' FactorWriteGuardTests lists, each with
+/// the proof it takes instead.
+User ProvenPastAFactor(string email, string password, string code, string passkeyToken, string passkeyResponse) {
+  var account = ProvenOwner(email, password, code, passkeyToken, passkeyResponse);
+  if (passkeyResponse == "" && account.TotpSecret == null) { PasswordProvesNoFactor(account); }
   return account;
 }

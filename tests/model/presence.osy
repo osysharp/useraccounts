@@ -1,0 +1,15 @@
+// A presence proof written by a function of the desk's own that is named like the kit's `ProvePresence` — what the kit's
+// floor on `PresenceProof` refuses (tests/presence.test.osy, an_apps_own_prove_presence_writes_no_proof).
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+/// The desk's own door to a proof for `act`, past the kit.
+public string DeskOwnPresence(string act) { return ProvePresence(1, act); }
+
+string ProvePresence(int planted, string act) {
+  var token = "planted-" + planted.ToString() + "-" + act;
+  new PresenceProof { Account = Me()!, ActHash = PresenceActHash(act), TokenHash = TokenHash(token), Way = "app",
+                      ExpiresAt = DateTime.UtcNow + PresenceLifetime() };
+  UnitOfWork.Commit();
+  return token;
+}

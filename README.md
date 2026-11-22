@@ -9,7 +9,7 @@ and the app writes **its roles and one setting**:
 // app.osy
 use Osysharp.Identity@0;
 use Osysharp.Mail@0;
-use Osysharp.UserAccounts@1;
+use Osysharp.UserAccounts@2;
 use Osysharp.EmailTemplates@0;
 use Osysharp.Ui;
 use Osysharp.Workflow;

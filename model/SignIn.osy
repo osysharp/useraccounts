@@ -95,8 +95,8 @@ bool MustProveAddress(User account) {
 /// proven who this is in its own way ends here, so the second factor and `AccountsSetup.Events` apply to it too.
 ///
 /// SECURITY-INVARIANT(accounts-sms-is-not-a-required-second-factor): an account the app REQUIRES a second factor of is
-/// asked for an authenticator app (or to set one up) whether or not it chose a texted code — the texted step is checked
-/// only after `Required`, and `SignInWithCode` refuses a texted code for such an account. A SIM swap or a port-out moves
+/// never signed in by a texted code: it is asked for its authenticator app or passkey, or to set one up — one that chose a
+/// texted code passes it first, and `SignInWithCode` then answers the set-up (`MustEnrol`), never a ticket. A SIM swap or a port-out moves
 /// a number to somebody else (NIST 800-63B "restricted"), so it is an account's choice, never an app's demand. Guarded by
 /// tests/sms.test.osy.
 ///
@@ -130,16 +130,20 @@ internal SignInStep ContinueSignInBy(User account, SignInWay via) {
                           PendingToken = SealToKeep(via) };
     return new SignInStep { Challenge = token, ChallengeBy = "app" };
   }
-  if (App.Setting<AccountsSetup>().SecondFactor.Required(account)) { return MustEnrol(account, via); }
-  if (TextedSecondStep(account)) {
-    var token = Security.RandomId(32);
-    DropLapsedSeals(account);
-    var challenge = new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime(),
-                                          PendingToken = SealToKeep(via) };
-    TextCode(account, CodePurpose.SecondStep, NumberToText(account), challenge);
-    return new SignInStep { Challenge = token, ChallengeBy = "sms", Account = MaskedPhone(NumberToText(account)) };
-  }
+  if (SecondFactorRequired(account)) { return EnrolOrAdmitByTheProvider(account, via); }
+  if (TextedSecondStep(account)) { return TextedChallenge(account, via); }
   return new SignInStep { Ticket = AdmitBy(account, via) };
+}
+
+/// The texted step of a sign-in that came in `via`: a code texted to the account's number, and the challenge
+/// `SignInWithCode` takes it with.
+SignInStep TextedChallenge(User account, SignInWay via) {
+  var token = Security.RandomId(32);
+  DropLapsedSeals(account);
+  var challenge = new SignInChallenge { Account = account, TokenHash = TokenHash(token), ExpiresAt = DateTime.UtcNow + ChallengeLifetime(),
+                                        PendingToken = SealToKeep(via) };
+  TextCode(account, CodePurpose.SecondStep, NumberToText(account), challenge);
+  return new SignInStep { Challenge = token, ChallengeBy = "sms", Account = MaskedPhone(NumberToText(account)) };
 }
 
 /// Does `account` sign in with a texted code after its password — it chose to, the app offers it, and it has a number for
@@ -154,6 +158,21 @@ bool TextedSecondStep(User account) {
 /// that signs in only through its provider refuses there (SECURITY-INVARIANT accounts-provider-only-at-every-door).
 SignInStep MustEnrol(User account, SignInWay? via = null) {
   return new SignInStep { MustEnrol = true, Enrolment = NewEnrolment(account, via), Account = account.Email };
+}
+
+/// The step for an account that must use two-step sign-in and has no authenticator: signed in when the provider's own
+/// second factor counts for THIS sign-in (`ProviderFactorCountsFor`); else the sentence to use it for one that has a passkey,
+/// its texted step for one that has one (`SignInWithCode` answers `MustEnrol` past it), and `MustEnrol` for one with neither.
+SignInStep EnrolOrAdmitByTheProvider(User account, SignInWay via) {
+  if (!ProviderFactorCountsFor(account, via)) {
+    // An account with a factor of its own uses it; enrolment is for one with none (SECURITY-INVARIANT
+    // accounts-a-factor-is-added-only-past-a-factor).
+    if (HoldsASecondFactor(account)) { throw new ValidationException(UseYourFactor()); }
+    if (TextedSecondStep(account)) { return TextedChallenge(account, via); }
+    return MustEnrol(account, via);
+  }
+  via.SecondStep = "provider";
+  return new SignInStep { Ticket = AdmitBy(account, via) };
 }
 
 /// Make an account and sign it in — or, when the app requires a proven address, answer `MustVerify` (a mail with a code and
@@ -215,7 +234,7 @@ public SignInStep SignUpAtDoor(string email, string password, string name) {
   GrantNewAccountRoles(account, first);
   SendCheck(account, address, false);
   if (MustProveAddress(account)) { return new SignInStep { MustVerify = true, Account = address }; }
-  if (setup.SecondFactor.Required(account)) { return MustEnrol(account, NotThroughAProvider()); }
+  if (SecondFactorRequired(account)) { return MustEnrol(account, NotThroughAProvider()); }
   return new SignInStep { Ticket = Admit(account) };
 }
 
@@ -408,6 +427,7 @@ public string ResetPassword(string token, string password) {
   // on any browser, on any node — is signed out when this commits. The ticket this answers is issued after, so it is
   // not among them. Guarded by tests/sessions.test.osy.
   Security.EndOtherSessions(account.Id);
+  EndPresenceOf(account.Id);
   account.PasswordHash = Security.HashPassword(password);
   account.PasswordChangedAt = now;
   // The way back for an account whose passkeys are lost: the mailed link sets a password, and password sign-in is on
@@ -420,7 +440,7 @@ public string ResetPassword(string token, string password) {
   if (account.TotpSecret != null || TextedSecondStep(account)) { return ""; }
   // An account the app requires two-step sign-in of, and that has none yet, is not signed in by a mailed link either:
   // the password is set and it signs in as usual, which takes it through setting the factor up.
-  if (App.Setting<AccountsSetup>().SecondFactor.Required(account)) { return ""; }
+  if (SecondFactorRequired(account)) { return ""; }
   return Admit(account);
 }
 
@@ -431,17 +451,23 @@ public string ChangePassword(string email, string currentPassword, string newPas
   var account = Verified(email, currentPassword);
   // A fresh ticket from a password: refused for an account that signs in only through its provider.
   RefuseOffTheRule(account, NotThroughAProvider());
-  if (account.TotpSecret != null) { RequireCode(account, code); }
+  var via = NotThroughAProvider();
+  if (account.TotpSecret != null) {
+    RequireCode(account, code);
+    via.SecondStep = "app";
+  }
   var problem = PasswordProblem(newPassword, account.Email);
   if (problem != "") { throw new ValidationException(problem); }
   var now = DateTime.UtcNow;
   // SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change): every other session of the account ends when
   // this commits; the one changing the password stays signed in. Guarded by tests/sessions.test.osy.
   Security.EndOtherSessions(account.Id);
+  EndPresenceOf(account.Id);
   account.PasswordHash = Security.HashPassword(newPassword);
   account.PasswordChangedAt = now;
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PasswordChanged(account));
-  return Security.IssueJwt(account.Id, account.Email);
+  // An account that must use two-step sign-in and gave no code is refused here (`Mint`), and nothing is changed.
+  return Mint(account, via);
 }
 
 /// Ask to move the account to a new address, given the current password — and, when two-step sign-in is on, a current
@@ -519,6 +545,7 @@ public string CancelAddressChange(string token) {
   // SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change): the person who asked is signed in somewhere —
   // opened from a mail, this has no session of its own, so every one of the account's ends when this commits.
   Security.EndOtherSessions(account.Id);
+  EndPresenceOf(account.Id);
   return check.Email;
 }
 
@@ -692,6 +719,7 @@ void StartOver(User account) {
   // …and every session it already has: a stranger who signed up first and was signed in then is signed out now
   // (SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change); guarded by tests/pre-hijack.test.osy).
   Security.EndOtherSessions(account.Id);
+  EndPresenceOf(account.Id);
   account.PasswordHash = null;
   account.TotpSecret = null;
   account.TotpLastStep = -1;
@@ -753,6 +781,7 @@ public void ConfirmAddressChange(EmailCheck check) {
   // reset to, so it is as much a change of the account's way in as a new password — every other session ends when
   // this commits, as after a password change. Guarded by tests/sessions.test.osy.
   Security.EndOtherSessions(account.Id);
+  EndPresenceOf(account.Id);
   account.Email = check.Email;
 }
 

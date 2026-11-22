@@ -148,21 +148,28 @@ void a_texted_second_step_asks_for_the_code_after_the_password() {
   string code = "";
   runas (AuthBootstrap) { code = TextedCode("+46700000002"); }
   string ticket = "";
-  runas (AuthBootstrap) { ticket = SignInWithCode(first.Challenge, code); }
+  runas (AuthBootstrap) { ticket = SignInWithCode(first.Challenge, code).Ticket; }
   Assert.NotEqual("", ticket);
 }
 
 [Test(Phones)]
 void a_texted_step_is_not_a_second_factor_the_app_can_require() {
   // SECURITY-INVARIANT(accounts-sms-is-not-a-required-second-factor): Root is an admin, and admins MUST use a second
-  // factor. Root chose a texted code — and is still asked to set up an authenticator app, with no ticket and no text.
+  // factor. Root chose a texted code — so is texted first, and past the code asked to set up an authenticator app, with no
+  // ticket at either step.
   runas (AuthBootstrap) { SetSmsSecondStep("root@desk.test", "correct-horse-3", true); }
   SignInStep step = new SignInStep();
   runas (AuthBootstrap) { step = SignIn("root@desk.test", "correct-horse-3"); }
-  Assert.True(step.MustEnrol);
+  Assert.False(step.MustEnrol);
   Assert.Equal("", step.Ticket);
-  Assert.Equal("", step.Challenge);
-  runas (AuthBootstrap) { Assert.Equal(0, TextsTo("+46700000003")); }
+  Assert.Equal("sms", step.ChallengeBy);
+  runas (AuthBootstrap) { Assert.Equal(1, TextsTo("+46700000003")); }
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000003"); }
+  SignInStep texted = new SignInStep();
+  runas (AuthBootstrap) { texted = SignInWithCode(step.Challenge, code); }
+  Assert.True(texted.MustEnrol);
+  Assert.Equal("", texted.Ticket);
 }
 
 [Test(Phones)]
@@ -174,7 +181,10 @@ void a_texted_challenge_made_before_the_app_required_a_factor_does_not_let_the_a
   runas (AuthBootstrap) { code = TextedCode("+46700000002"); }
   // Bo is made an admin between the password and the code.
   runas (AuthBootstrap) { new RoleGrant { Member = User.Single(u => u.Email == "bo@desk.test"), Role = AppRole.Admin }; }
-  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(first.Challenge, code)); }
+  SignInStep texted = new SignInStep();
+  runas (AuthBootstrap) { texted = SignInWithCode(first.Challenge, code); }
+  Assert.Equal("", texted.Ticket);
+  Assert.True(texted.MustEnrol);
 }
 
 [Test(Phones)]
@@ -288,7 +298,7 @@ void a_number_two_accounts_share_is_proven_by_each_and_signs_in_neither() {
     string code = "";
     runas (AuthBootstrap) { code = TextedCode("+46700000002"); }
     string ticket = "";
-    runas (AuthBootstrap) { ticket = SignInWithCode(first.Challenge, code); }
+    runas (AuthBootstrap) { ticket = SignInWithCode(first.Challenge, code).Ticket; }
     Assert.NotEqual("", ticket);
   }
 }

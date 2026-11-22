@@ -14,6 +14,9 @@
 using Osysharp.Identity;
 using Osysharp.UserAccounts;
 
+/// The account the stranger made in the owner's address, signed in as itself.
+principal TheStrangersAccount => User.Single(u => u.Email == "owner@desk.test");
+
 [TestFixture]
 void Strangers() {
   // Somebody already here, so the stranger's account is not the app's first (which this desk makes an admin).
@@ -83,11 +86,12 @@ void everything_the_stranger_set_up_before_the_proof_is_cleared() {
   // authenticator of their own, and their own Google account as a way in.
   runas (AuthBootstrap) { SignUp("owner@desk.test", "strangers-password-1", "Mallory"); }
   var key = NewSecondFactorSetup("owner@desk.test").Key;
-  runas (AuthBootstrap) {
+  // Signed in as the account they made: the account page links a provider only to the account it is signed in to.
+  runas (TheStrangersAccount) { runas (AuthBootstrap) {
     EnableSecondFactor("owner@desk.test", "strangers-password-1", key, Totp.Code(key));
     LinkProvider("owner@desk.test", "strangers-password-1", TestOAuth.PendingToken("mallory@evil.test", "Google"),
                  Totp.Code(key, DateTime.UtcNow.AddSeconds(30)));
-  }
+  } }
   string token = "";
   runas (AuthBootstrap) { token = TokenIn("owner@desk.test", "/verify-email/"); }
   SignInStep claimed = new SignInStep();

@@ -1518,12 +1518,6 @@ translations ar {
   /// shown through ValidationException
   error "There is an account for {address}, but it has not confirmed its address yet. We have sent a link to confirm it — then sign in with {provider} again, or sign in with your password." => "يوجد حساب لـ {address}، لكنه لم يؤكد عنوانه بعد. أرسلنا رابطًا لتأكيده، ثم سجّل الدخول باستخدام {provider} مجددًا، أو سجّل الدخول بكلمة المرور.";
 
-  // ── SignInWithTextedCode ──
-  /// SignInWithTextedCode · an error message
-  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
-  /// shown through ValidationException
-  error "{AccountsAppName} asks for an authenticator app on your account — a texted code is not enough. Sign in again to set one up." => "يطلب {AccountsAppName} تطبيق مصادقة لحسابك، ولا يكفي رمز مُرسل في رسالة نصية. سجّل الدخول مجددًا لإعداده.";
-
   // ── SignUp ──
   /// SignUp · an error message
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)

@@ -20,6 +20,11 @@ public string ErasedAddress(Principal account) { return $"erased-{account.Id}@er
 [Server, Authorize(IsAuthenticator)]
 void ForgetAccountAddress(User account) { account.Email = ErasedAddress(account); }
 
+/// An erased account's last used authenticator step goes with its key — one of the ways the step changes (`User`'s
+/// `deny update TotpLastStep … except via …`). Called by `EraseAccount` alone.
+[Server, Authorize(IsAuthenticator)]
+void ForgetSecondFactorStep(User account) { account.TotpLastStep = -1; }
+
 /// Erase `account`: every way in, every way to reach it, and every record of how it signed in. Written as the run that
 /// erases — a workflow body, as the system — so call it from one: in a request the kit's own rules refuse it, as they
 /// refuse every other write to an account's address and credentials.
@@ -61,7 +66,7 @@ public void EraseAccount(User account) {
   account.PasswordHash = null;
   account.PasswordChangedAt = null;
   account.TotpSecret = null;
-  account.TotpLastStep = -1;
+  ForgetSecondFactorStep(account);
   account.SecondFactorOnAt = null;
   account.Phone = null;
   account.PhoneVerifiedAt = null;

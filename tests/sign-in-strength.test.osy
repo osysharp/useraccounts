@@ -1,0 +1,456 @@
+// How strong a sign-in must be (ORGPOL OP-IdP5a) — SECURITY-INVARIANT sign-in-strength-at-the-one-mint. The provider's own factor
+// counts only under the organisation's pin, a rule a test run does not carry, so provider-factor-counts-only-when-pinned is held by
+// Platform.Tests' KitProviderFactorTests, whose issuer carries it. The app's `SecondFactorForAll` (an organisation's lock sets it) or its `SignInRules`
+// asks every account for a second step that THIS sign-in proved — a code, a passkey, or a counted provider factor — and the
+// kit's `Mint` refuses a ticket without one; the platform's mint refuses any ticket under the app's rule that the kit's `Mint`
+// did not make. A sign-in's hours end its ticket. The desk's switches are stubbed functions (tests/model/strength.osy).
+
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+[TestFixture]
+void StrengthDesk() {
+  var ada = new User { Email = "ada@desk.test", DisplayName = "Ada", PasswordHash = Security.HashPassword("correct-horse-1"),
+                       EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = ada, Role = AppRole.Member };
+  // Bo chose a texted code as his second step, on a proven number.
+  var bo = new User { Email = "bo@desk.test", DisplayName = "Bo", PasswordHash = Security.HashPassword("correct-horse-2"),
+                      EmailVerifiedAt = DateTime.UtcNow, Phone = "+46700000002", PhoneVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = bo, Role = AppRole.Member };
+  // An admin, whom the desk's own `SecondFactor.Required` asks for two-step sign-in, who has not set it up.
+  var root = new User { Email = "root@desk.test", DisplayName = "Root", PasswordHash = Security.HashPassword("correct-horse-9"),
+                        EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = root, Role = AppRole.Admin };
+  // A member on acme.test, which the tests bind to a provider.
+  var cy = new User { Email = "cy@acme.test", DisplayName = "Cy", PasswordHash = Security.HashPassword("correct-horse-3"),
+                      EmailVerifiedAt = DateTime.UtcNow };
+  new RoleGrant { Member = cy, Role = AppRole.Member };
+}
+
+principal Ada => User.Single(u => u.Email == "ada@desk.test");
+
+void TwoStepForEveryone() { DeskStepForAll.Stub(() => true); }
+
+string StepRequired() { return "Two-step sign-in is required here — sign in again."; }
+
+/// The ticket's own end in seconds since 1970 (0 for none): a served run's JWT carries it as `osy_not_after`; a runner with
+/// no signing key mints the readable stand-in `…-until-<yyyyMMddHHmmss>`.
+long EndOf(string ticket) {
+  if (ticket.Contains("-until-")) {
+    var at = ticket.Substring(ticket.IndexOf("-until-") + 7);
+    if (at == "") { return 0; }
+    var when = new DateTime(int.Parse(at.Substring(0, 4)), int.Parse(at.Substring(4, 2)), int.Parse(at.Substring(6, 2)),
+                            int.Parse(at.Substring(8, 2)), int.Parse(at.Substring(10, 2)), int.Parse(at.Substring(12, 2)), DateTimeKind.Utc);
+    return new DateTimeOffset(when).ToUnixTimeSeconds();
+  }
+  var part = ticket.Split('.')[1].Replace('-', '+').Replace('_', '/');
+  var payload = Encoding.UTF8.GetString(Convert.FromBase64String(part.PadRight(part.Length + (4 - part.Length % 4) % 4, '=')));
+  var claim = "\"osy_not_after\":";
+  if (!payload.Contains(claim)) { return 0; }
+  var rest = payload.Substring(payload.IndexOf(claim) + claim.Length);
+  var digits = "";
+  foreach (var c in rest) { if (c >= '0' && c <= '9') { digits = digits + c; } else { break; } }
+  return long.Parse(digits);
+}
+
+long SecondsFromNow(int hours) { return new DateTimeOffset(DateTime.SpecifyKind(DateTime.UtcNow.AddHours(hours), DateTimeKind.Utc)).ToUnixTimeSeconds(); }
+
+// ── A1: the lock asks every account; the kit's every code step meets it.
+[Test(StrengthDesk)]
+void every_member_must_enrol_under_rule() {
+  TwoStepForEveryone();
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("ada@desk.test", "correct-horse-1"); }
+  Assert.True(step.MustEnrol);
+  Assert.Equal("", step.Ticket);
+  // Setting the authenticator up signs her in, and so does the next code.
+  var key = NewSecondFactorSetup("ada@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("", "", key, Totp.Code(key), step.Enrolment); }
+  Assert.NotEqual("", on.Ticket);
+  SignInStep again = new SignInStep();
+  runas (AuthBootstrap) { again = SignIn("ada@desk.test", "correct-horse-1"); }
+  Assert.Equal("", again.Ticket);
+  string ticket = "";
+  runas (AuthBootstrap) { ticket = SignInWithCode(again.Challenge, Totp.Code(key, DateTime.UtcNow.AddSeconds(30))).Ticket; }
+  Assert.NotEqual("", ticket);
+}
+
+// ── A2: the app's `SignInRules` hours end the ticket.
+[Test(StrengthDesk)]
+void ticket_ends_by_sign_in_hours() {
+  DeskOwnHours.Stub(() => 2);
+  var before = SecondsFromNow(2);
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("ada@desk.test", "correct-horse-1"); }
+  var end = EndOf(step.Ticket);
+  Assert.True(end >= before - 5 && end <= SecondsFromNow(2) + 5, $"the ticket ends at {end}, not two hours from now ({before})");
+}
+
+// ── A3: a changed password's fresh ticket needs the step too.
+[Test(StrengthDesk)]
+void fresh_ticket_needs_second_step_under_rule() {
+  runas (AuthBootstrap) {
+    Assert.Equal(StepRequired(),
+                 Assert.Throws<ValidationException>(() => ChangePassword("root@desk.test", "correct-horse-9", "a-whole-new-one-9")).Message);
+  }
+  // Nothing was changed: the old password still opens the step that sets two-step sign-in up.
+  runas (AuthBootstrap) { Assert.True(SignIn("root@desk.test", "correct-horse-9").MustEnrol); }
+}
+
+// ── A4: a passkey is both steps — at sign-in, at enrolment, and for a removed password's fresh ticket.
+[Test(StrengthDesk)]
+void a_passkey_meets_the_two_step_rule() {
+  TwoStepForEveryone();
+  var key = WebAuthn.NewTestKey();
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("ada@desk.test", "correct-horse-1"); }
+  Assert.True(step.MustEnrol);
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("ada@desk.test", "", "", "", "", step.Enrolment); }
+  PasskeyAdding added = new PasskeyAdding();
+  runas (AuthBootstrap) {
+    added = AddPasskey("ada@desk.test", "", "", "", "", step.Enrolment, first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "MacBook");
+  }
+  Assert.NotEqual("", added.Ticket);
+  string handle = "";
+  runas (AuthBootstrap) { handle = PasskeyHandle(User.Single(u => u.Email == "ada@desk.test")); }
+  PasskeyStart start = new PasskeyStart();
+  runas (AuthBootstrap) { start = StartPasskeySignIn(); }
+  SignInStep signedIn = new SignInStep();
+  runas (AuthBootstrap) { signedIn = SignInWithPasskey(start.Token, WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 1, true)); }
+  Assert.NotEqual("", signedIn.Ticket);
+  PasskeyStart confirm = new PasskeyStart();
+  runas (AuthBootstrap) { confirm = StartPasskeySignIn(); }
+  string fresh = "";
+  runas (AuthBootstrap) { fresh = RemovePassword("ada@desk.test", confirm.Token, WebAuthn.TestGet(key, confirm.Options, PasskeyOrigin(), handle, 2, true)); }
+  Assert.NotEqual("", fresh);
+}
+
+// ── A5: a texted code is never the step the rule asks for — the app's own `SignInRules` here, which the platform does not see.
+[Test(StrengthDesk)]
+void a_texted_code_never_meets_two_step_rule() {
+  runas (AuthBootstrap) { SetSmsSecondStep("bo@desk.test", "correct-horse-2", true); }
+  SignInStep first = new SignInStep();
+  runas (AuthBootstrap) { first = SignIn("bo@desk.test", "correct-horse-2"); }
+  Assert.Equal("sms", first.ChallengeBy);
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000002"); }
+  DeskStepForItsOwn.Stub(() => true);
+  // The code signs him not in: past it he sets a step up that counts.
+  SignInStep texted = new SignInStep();
+  runas (AuthBootstrap) { texted = SignInWithCode(first.Challenge, code); }
+  Assert.Equal("", texted.Ticket);
+  Assert.True(texted.MustEnrol);
+  // …and the next sign-in texts him first again, with no enrolment before the code.
+  SignInStep next = new SignInStep();
+  runas (AuthBootstrap) { next = SignIn("bo@desk.test", "correct-horse-2"); }
+  Assert.False(next.MustEnrol);
+  Assert.Equal("", next.Ticket);
+  Assert.Equal("sms", next.ChallengeBy);
+}
+
+// ── A6: under the lock nobody gets round two-step sign-in with the texted step, and the account page says it is required.
+[Test(StrengthDesk)]
+void two_step_cannot_be_turned_off_under_rule() {
+  runas (AuthBootstrap) { SetSmsSecondStep("bo@desk.test", "correct-horse-2", true); }
+  SignInStep first = new SignInStep();
+  runas (AuthBootstrap) { first = SignIn("bo@desk.test", "correct-horse-2"); }
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000002"); }
+  TwoStepForEveryone();
+  SignInStep texted = new SignInStep();
+  runas (AuthBootstrap) { texted = SignInWithCode(first.Challenge, code); }
+  Assert.Equal("", texted.Ticket);
+  Assert.True(texted.MustEnrol);
+  runas (Ada) { Assert.True(MySecondFactor().Required); }
+}
+
+// ── A7: an app that sets nothing signs in as before: no step asked, no end of its own.
+[Test(StrengthDesk)]
+void unbound_app_signs_in_as_today() {
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignIn("ada@desk.test", "correct-horse-1"); }
+  Assert.NotEqual("", step.Ticket);
+  Assert.False(step.MustEnrol);
+  Assert.Equal(0, EndOf(step.Ticket));
+  runas (Ada) { Assert.False(MySecondFactor().Required); }
+  // The desk passes the kit's own defaults; an app that leaves them out gets the same.
+  var unset = new AccountsSetup();
+  Assert.Equal(12, unset.SignInHours);
+  Assert.False(unset.SecondFactorForAll);
+}
+
+// ── A8: the app's `SignInRules` adds two-step sign-in, and never lifts the lock.
+[Test(StrengthDesk)]
+void override_adds_but_never_lifts_two_step() {
+  TwoStepForEveryone();
+  runas (AuthBootstrap) { Assert.True(SignIn("ada@desk.test", "correct-horse-1").MustEnrol); }
+  DeskStepForAll.Stub(() => false);
+  DeskStepForItsOwn.Stub(() => true);
+  runas (AuthBootstrap) { Assert.True(SignIn("ada@desk.test", "correct-horse-1").MustEnrol); }
+  // An account the override does not name is not asked.
+  runas (AuthBootstrap) { Assert.NotEqual("", SignIn("cy@acme.test", "correct-horse-3").Ticket); }
+}
+
+// ── The other doors that end in a ticket ask too: a reset link signs nobody in, a sign-up and a provider's sign-up enrol.
+[Test(StrengthDesk)]
+void a_reset_link_admits_nobody_under_two_step() {
+  runas (AuthBootstrap) { RequestPasswordReset("ada@desk.test"); }
+  string token = "";
+  runas (AuthBootstrap) { token = TokenIn("ada@desk.test", "/reset-password/"); }
+  TwoStepForEveryone();
+  runas (AuthBootstrap) { Assert.Equal("", ResetPassword(token, "a-whole-new-one-1")); }
+  runas (AuthBootstrap) { Assert.True(SignIn("ada@desk.test", "a-whole-new-one-1").MustEnrol); }
+}
+
+[Test(StrengthDesk)]
+void sign_up_must_enrol_under_two_step() {
+  TwoStepForEveryone();
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignUp("dee@desk.test", "correct-horse-4", "Dee"); }
+  Assert.True(step.MustEnrol);
+  Assert.Equal("", step.Ticket);
+}
+
+[Test(StrengthDesk)]
+void provider_sign_up_must_enrol_under_two_step() {
+  TwoStepForEveryone();
+  SignInStep step = new SignInStep();
+  runas (AuthBootstrap) { step = SignInWithProvider(TestOAuth.PendingToken("eli@desk.test", "Google")); }
+  Assert.True(step.MustEnrol);
+  Assert.Equal("", step.Ticket);
+}
+
+// ── A12 and M3b: under the lock the platform's mint refuses the app's own door, and a function of the app named `Mint`.
+[Test(StrengthDesk)]
+void an_apps_own_sign_in_refused_under_two_step() {
+  runas (AuthBootstrap) { Assert.NotEqual("", DeskOwnSignIn("ada@desk.test", "correct-horse-1")); }
+  TwoStepForEveryone();
+  runas (AuthBootstrap) { Assert.Equal(StepRequired(), Assert.Throws(() => DeskOwnSignIn("ada@desk.test", "correct-horse-1")).Message); }
+}
+
+[Test(StrengthDesk)]
+void an_app_function_named_mint_is_refused() {
+  runas (AuthBootstrap) { Assert.NotEqual("", DeskOwnMintSignIn("ada@desk.test", "correct-horse-1")); }
+  TwoStepForEveryone();
+  runas (AuthBootstrap) { Assert.Equal(StepRequired(), Assert.Throws(() => DeskOwnMintSignIn("ada@desk.test", "correct-horse-1")).Message); }
+}
+
+// ── An account with a second factor of its own uses it: its password alone reaches no enrolment, and adds no factor.
+string FactorFirst() { return "This account signs in with its passkey or authenticator app — use it to go on."; }
+
+[Test(StrengthDesk)]
+void a_passkey_account_cannot_enrol_by_password() {
+  // Ada, with no factor yet, adds a passkey on her password.
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("ada@desk.test", "correct-horse-1"); }
+  runas (AuthBootstrap) {
+    AddPasskey("ada@desk.test", "correct-horse-1", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "MacBook");
+  }
+  TwoStepForEveryone();
+  runas (AuthBootstrap) {
+    Assert.Equal(FactorFirst(), Assert.Throws<ValidationException>(() => SignIn("ada@desk.test", "correct-horse-1")).Message);
+  }
+  // Her passkey still signs her in.
+  string handle = "";
+  runas (AuthBootstrap) { handle = PasskeyHandle(User.Single(u => u.Email == "ada@desk.test")); }
+  PasskeyStart start = new PasskeyStart();
+  runas (AuthBootstrap) { start = StartPasskeySignIn(); }
+  SignInStep signedIn = new SignInStep();
+  runas (AuthBootstrap) { signedIn = SignInWithPasskey(start.Token, WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 1, true)); }
+  Assert.NotEqual("", signedIn.Ticket);
+}
+
+[Test(StrengthDesk)]
+void adding_a_factor_needs_a_passed_factor() {
+  // Root must use two-step sign-in (the desk's own `SecondFactor.Required`) and has no factor: each sign-in answers an enrolment.
+  SignInStep mine = new SignInStep();
+  runas (AuthBootstrap) { mine = SignIn("root@desk.test", "correct-horse-9"); }
+  SignInStep forAnApp = new SignInStep();
+  runas (AuthBootstrap) { forAnApp = SignIn("root@desk.test", "correct-horse-9"); }
+  SignInStep forAKey = new SignInStep();
+  runas (AuthBootstrap) { forAKey = SignIn("root@desk.test", "correct-horse-9"); }
+  Assert.True(forAnApp.MustEnrol);
+  Assert.True(forAKey.MustEnrol);
+  // Root sets a passkey up with the first.
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("root@desk.test", "", "", "", "", mine.Enrolment); }
+  PasskeyAdding added = new PasskeyAdding();
+  runas (AuthBootstrap) {
+    added = AddPasskey("root@desk.test", "", "", "", "", mine.Enrolment, first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "MacBook");
+  }
+  Assert.NotEqual("", added.Ticket);
+  // The other enrolments add nothing to an account that now has a factor: not an authenticator, not a passkey.
+  var totp = NewSecondFactorSetup("root@desk.test").Key;
+  runas (AuthBootstrap) {
+    Assert.Equal(FactorFirst(),
+                 Assert.Throws<ValidationException>(() => EnableSecondFactor("", "", totp, Totp.Code(totp), forAnApp.Enrolment)).Message);
+    Assert.Equal(FactorFirst(), Assert.Throws<ValidationException>(() => AddPasskey("root@desk.test", "", "", "", "", forAKey.Enrolment)).Message);
+  }
+  // …and neither does the password alone.
+  runas (AuthBootstrap) {
+    Assert.Equal(FactorFirst(),
+                 Assert.Throws<ValidationException>(() => EnableSecondFactor("root@desk.test", "correct-horse-9", totp, Totp.Code(totp))).Message);
+    Assert.Equal(FactorFirst(), Assert.Throws<ValidationException>(() => AddPasskey("root@desk.test", "correct-horse-9")).Message);
+  }
+  runas (AuthBootstrap) {
+    var root = User.Single(u => u.Email == "root@desk.test");
+    Assert.Null(root.TotpSecret);
+    Assert.Equal(1, PasskeyCredential.Count(p => p.Account == root));
+  }
+}
+
+[Test(StrengthDesk)]
+void a_code_account_cannot_enrol_again() {
+  // Two enrolments for Root; the first sets an authenticator up.
+  SignInStep mine = new SignInStep();
+  runas (AuthBootstrap) { mine = SignIn("root@desk.test", "correct-horse-9"); }
+  SignInStep theirs = new SignInStep();
+  runas (AuthBootstrap) { theirs = SignIn("root@desk.test", "correct-horse-9"); }
+  var totp = NewSecondFactorSetup("root@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("", "", totp, Totp.Code(totp), mine.Enrolment); }
+  Assert.NotEqual("", on.Ticket);
+  // The second adds no passkey past the code the account now has.
+  runas (AuthBootstrap) {
+    Assert.Equal(FactorFirst(), Assert.Throws<ValidationException>(() => AddPasskey("root@desk.test", "", "", "", "", theirs.Enrolment)).Message);
+  }
+  runas (AuthBootstrap) { Assert.Equal(0, PasskeyCredential.Count(p => p.Account.Email == "root@desk.test")); }
+}
+
+// ── A texted step is passed before a factor is set up, and a factor goes only past a factor.
+[Test(StrengthDesk)]
+void an_sms_account_texts_before_it_enrols() {
+  // Bo signs in with a texted code; the rule then asks everybody for a step that counts.
+  runas (AuthBootstrap) { SetSmsSecondStep("bo@desk.test", "correct-horse-2", true); }
+  TwoStepForEveryone();
+  // His password alone: a texted code, and no enrolment.
+  SignInStep first = new SignInStep();
+  runas (AuthBootstrap) { first = SignIn("bo@desk.test", "correct-horse-2"); }
+  Assert.False(first.MustEnrol);
+  Assert.Equal("", first.Enrolment);
+  Assert.Equal("", first.Ticket);
+  Assert.Equal("sms", first.ChallengeBy);
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000002"); }
+  // A wrong code: no enrolment.
+  SignInStep wrong = new SignInStep();
+  runas (AuthBootstrap) { wrong = SignInWithCode(first.Challenge, code == "123456" ? "654321" : "123456"); }
+  Assert.False(wrong.MustEnrol);
+  Assert.Equal("", wrong.Enrolment);
+  // The texted code: the enrolment, and still no ticket.
+  SignInStep texted = new SignInStep();
+  runas (AuthBootstrap) { texted = SignInWithCode(first.Challenge, code); }
+  Assert.True(texted.MustEnrol);
+  Assert.NotEqual("", texted.Enrolment);
+  Assert.Equal("", texted.Ticket);
+  var totp = NewSecondFactorSetup("bo@desk.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("", "", totp, Totp.Code(totp), texted.Enrolment); }
+  Assert.NotEqual("", on.Ticket);
+}
+
+[Test(StrengthDesk)]
+void removing_a_factor_needs_a_passed_factor() {
+  // Ada, with no factor yet, adds a passkey on her password.
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("ada@desk.test", "correct-horse-1"); }
+  runas (AuthBootstrap) {
+    AddPasskey("ada@desk.test", "correct-horse-1", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "MacBook");
+  }
+  // Her password alone removes no factor: the passkey stays, and under the rule the password still reaches no enrolment.
+  runas (AuthBootstrap) {
+    Assert.Equal(FactorFirst(), Assert.Throws<ValidationException>(() => RemovePasskey("ada@desk.test", WebAuthn.TestCredentialId(key), "correct-horse-1")).Message);
+  }
+  runas (AuthBootstrap) { Assert.Equal(1, PasskeyCredential.Count(p => p.Account.Email == "ada@desk.test")); }
+  TwoStepForEveryone();
+  runas (AuthBootstrap) {
+    Assert.Equal(FactorFirst(), Assert.Throws<ValidationException>(() => SignIn("ada@desk.test", "correct-horse-1")).Message);
+  }
+  // The passkey, passed, removes itself.
+  string handle = "";
+  runas (AuthBootstrap) { handle = PasskeyHandle(User.Single(u => u.Email == "ada@desk.test")); }
+  PasskeyStart confirm = new PasskeyStart();
+  runas (AuthBootstrap) { confirm = StartPasskeySignIn(); }
+  runas (AuthBootstrap) {
+    RemovePasskey("ada@desk.test", WebAuthn.TestCredentialId(key), "", "", confirm.Token, WebAuthn.TestGet(key, confirm.Options, PasskeyOrigin(), handle, 1, true));
+  }
+  runas (AuthBootstrap) { Assert.Equal(0, PasskeyCredential.Count(p => p.Account.Email == "ada@desk.test")); }
+  // Cy holds an authenticator and a passkey: a recovery code of the authenticator, passed, removes the passkey.
+  var totp = NewSecondFactorSetup("cy@acme.test").Key;
+  SecondFactorOn on = new SecondFactorOn();
+  runas (AuthBootstrap) { on = EnableSecondFactor("cy@acme.test", "correct-horse-3", totp, Totp.Code(totp)); }
+  var cys = WebAuthn.NewTestKey();
+  PasskeyAdding adding = new PasskeyAdding();
+  runas (AuthBootstrap) { adding = AddPasskey("cy@acme.test", "correct-horse-3", Totp.Code(totp, DateTime.UtcNow.AddSeconds(30))); }
+  runas (AuthBootstrap) {
+    AddPasskey("cy@acme.test", "", "", "", "", "", adding.Token, WebAuthn.TestCreate(cys, adding.Options, PasskeyOrigin()), "Phone");
+  }
+  runas (AuthBootstrap) { RemovePasskey("cy@acme.test", WebAuthn.TestCredentialId(cys), "correct-horse-3", on.RecoveryCodes[0]); }
+  runas (AuthBootstrap) { Assert.Equal(0, PasskeyCredential.Count(p => p.Account.Email == "cy@acme.test")); }
+}
+
+// ── A texted step is a factor too: past the password alone nothing is added to an account that holds one.
+string TextFirst() {
+  return "This account's second step is a code texted to its phone — turn texted sign-in codes off first (that texts you a code), then set this up.";
+}
+
+[Test(StrengthDesk)]
+void an_sms_account_cannot_enable_totp_by_password() {
+  runas (AuthBootstrap) { SetSmsSecondStep("bo@desk.test", "correct-horse-2", true); }
+  TwoStepForEveryone();
+  var totp = NewSecondFactorSetup("bo@desk.test").Key;
+  runas (AuthBootstrap) {
+    Assert.Equal(TextFirst(),
+                 Assert.Throws<ValidationException>(() => EnableSecondFactor("bo@desk.test", "correct-horse-2", totp, Totp.Code(totp))).Message);
+  }
+  runas (AuthBootstrap) { Assert.Null(User.Single(u => u.Email == "bo@desk.test").TotpSecret); }
+}
+
+[Test(StrengthDesk)]
+void an_sms_account_cannot_add_a_passkey_by_password() {
+  runas (AuthBootstrap) { SetSmsSecondStep("bo@desk.test", "correct-horse-2", true); }
+  TwoStepForEveryone();
+  runas (AuthBootstrap) {
+    Assert.Equal(TextFirst(), Assert.Throws<ValidationException>(() => AddPasskey("bo@desk.test", "correct-horse-2")).Message);
+  }
+  // Past his text, the enrolment it answers starts the passkey.
+  SignInStep first = new SignInStep();
+  runas (AuthBootstrap) { first = SignIn("bo@desk.test", "correct-horse-2"); }
+  string code = "";
+  runas (AuthBootstrap) { code = TextedCode("+46700000002"); }
+  SignInStep texted = new SignInStep();
+  runas (AuthBootstrap) { texted = SignInWithCode(first.Challenge, code); }
+  PasskeyAdding adding = new PasskeyAdding();
+  runas (AuthBootstrap) { adding = AddPasskey("bo@desk.test", "", "", "", "", texted.Enrolment); }
+  Assert.NotEqual("", adding.Token);
+}
+
+[Test(StrengthDesk)]
+void a_passkey_account_cannot_add_texts_by_password() {
+  // Bo, with no factor yet, adds a passkey on his password; his number is proven for texts.
+  var key = WebAuthn.NewTestKey();
+  PasskeyAdding first = new PasskeyAdding();
+  runas (AuthBootstrap) { first = AddPasskey("bo@desk.test", "correct-horse-2"); }
+  runas (AuthBootstrap) {
+    AddPasskey("bo@desk.test", "", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "MacBook");
+  }
+  runas (AuthBootstrap) {
+    Assert.Equal(FactorFirst(), Assert.Throws<ValidationException>(() => SetSmsSecondStep("bo@desk.test", "correct-horse-2", true)).Message);
+  }
+  runas (AuthBootstrap) { Assert.False(User.Single(u => u.Email == "bo@desk.test").SmsSecondStep); }
+}
+
+[Test(StrengthDesk)]
+void an_sms_number_moves_not_by_password() {
+  runas (AuthBootstrap) { SetSmsSecondStep("bo@desk.test", "correct-horse-2", true); }
+  runas (AuthBootstrap) {
+    Assert.Equal("Turn off text-message sign-in codes first — this number is your second step.",
+                 Assert.Throws<ValidationException>(() => ProvePhone("bo@desk.test", "correct-horse-2", "+46700000099")).Message);
+  }
+  runas (AuthBootstrap) { Assert.Equal(0, TextsTo("+46700000099")); }
+}

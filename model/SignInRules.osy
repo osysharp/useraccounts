@@ -26,6 +26,10 @@ class SignInWay {
   /// The credential id of the passkey THIS sign-in was made with ("" for any other way): set only by `SignInWithPasskey`,
   /// after `WebAuthn.Verify` accepted it, so the override's waiver (`SignInRulePolicy.Waives`) is asked of a proven key.
   public string Passkey = "";
+  /// The second step THIS sign-in proved, set by the kit where the step was checked: "app" (an authenticator or recovery
+  /// code), "sms" (a texted code, which never meets a requirement), "passkey", "provider" (a counted provider factor), or
+  /// "" for none. Never kept on a challenge: a step is proven in the request that mints.
+  public string SecondStep = "";
 }
 
 /// A sign-in that came through no provider.
@@ -108,6 +112,12 @@ public class SignInRulePolicy {
   /// which the app checks, records and tells as it decides. Asked ONLY for a passkey sign-in, ONLY when the locked rule binds the
   /// account, and BEFORE that rule is judged; no other way in is ever asked it. False (the default) for every other app.
   public virtual bool BreakGlassWaivesTheLock(User account, string passkey) { return false; }
+  /// Whether `account` must ALSO use two-step sign-in (OP-IdP5a: Admin, for the members of an organisation that asks it).
+  /// It only adds: the app's `SecondFactorForAll` and `SecondFactor.Required` are asked whatever this says.
+  public virtual bool SecondFactorForAll(User account) { return false; }
+  /// The most hours a sign-in of `account` may last (1–12). It only lowers: the smaller of this and the app's
+  /// `SignInHours` binds, and 12 (the default) adds nothing.
+  public virtual int SignInHours(User account) { return 12; }
 }
 
 /// The rule `value` (`<provider> <domain>[,<domain>…]`, or `client:<key> <domain>[,…]`) makes for the address `email`: null when the value names no
@@ -221,10 +231,33 @@ void RefuseOffTheRule(User account, SignInWay via) {
   if (locked != null && via.Passkey != "" && setup.SignInRules.BreakGlassWaivesTheLock(account, via.Passkey)) { return; }
   var rule = locked ?? setup.SignInRules.ProviderOnly(account);
   if (rule == null) { return; }
-  if (rule!.Provider.StartsWith("client:")) {
-    if (via.ProviderName == "org:" + rule!.Provider.Substring(7)
-        && (via.ProviderType != "google" || (via.HostedDomain != "" && rule!.Domains.Contains(via.HostedDomain)))) { return; }
-  } else if (via.ProviderType == rule!.Provider && via.HostedDomain != "" && rule!.Domains.Contains(via.HostedDomain)) { return; }
+  if (CameThrough(rule!, via)) { return; }
   if (locked == null && via.Passkey != "" && setup.SignInRules.Waives(account, via.Passkey)) { return; }
   throw new ValidationException($"{rule!.Domain} accounts sign in with {ProviderTypeName(rule!.Provider)}.");
+}
+
+/// Did a sign-in that came in `via` come through what `rule` names: its provider's TYPE with one of its hosted domains in
+/// THIS sign-in's seal, or, for a `client:<key>` rule, the organisation's client `org:<key>` (with one of its hosted domains
+/// when that client is a google kind)?
+bool CameThrough(ProviderRule rule, SignInWay via) {
+  if (rule.Provider.StartsWith("client:")) {
+    return via.ProviderName == "org:" + rule.Provider.Substring(7)
+        && (via.ProviderType != "google" || (via.HostedDomain != "" && rule.Domains.Contains(via.HostedDomain)));
+  }
+  return via.ProviderType == rule.Provider && via.HostedDomain != "" && rule.Domains.Contains(via.HostedDomain);
+}
+
+/// SECURITY-INVARIANT(provider-factor-counts-only-when-pinned): the provider's own second factor stands in for the kit's only
+/// when the app's `ProviderFactorCounts` says so, a rule binds the account (the lock, else the app's `SignInRules`) and THIS
+/// sign-in came through it (never by a waiver), and the platform judges the sealed factor fresh and of the organisation's pin
+/// (its own sign-in client, or a Microsoft tenant its rule lists), never Google's (`Security.PendingOAuthSecondFactor`). An
+/// account no rule binds, a sign-in that did not pass the rule, and a Google one are asked for the kit's own step. Guarded by
+/// Platform.Tests' KitProviderFactorTests (`pinned_entra_mfa_counts_when_allowed`, `google_never_satisfies_the_factor`,
+/// `entra_mfa_ignored_when_not_allowed`, `unbound_entra_mfa_does_not_count`).
+bool ProviderFactorCountsFor(User account, SignInWay via) {
+  var setup = App.Setting<AccountsSetup>();
+  if (!setup.ProviderFactorCounts || via.Seal == "") { return false; }
+  var rule = ProviderRuleIn(setup.ProviderOnly, account.Email) ?? setup.SignInRules.ProviderOnly(account);
+  if (rule == null || !CameThrough(rule!, via)) { return false; }
+  return Security.PendingOAuthSecondFactor(via.Seal);
 }

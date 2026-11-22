@@ -102,8 +102,9 @@ void a_passkey_answer_works_once_and_its_ceremony_dies_in_five_minutes() {
   runas (AuthBootstrap) { other = StartPasskeySignIn(); }
   runas (AuthBootstrap) { Assert.Contains("another sign-in's challenge", Assert.Throws<ValidationException>(() => SignInWithPasskey(other.Token, answer)).Message); }
   // …and an ADD ceremony is never a sign-in.
+  var forAdd = ConfirmWith(key, handle, 3);
   PasskeyAdding adding = new PasskeyAdding();
-  runas (AuthBootstrap) { adding = AddPasskey("ada@desk.test", "correct-horse-1"); }
+  runas (AuthBootstrap) { adding = AddPasskey("ada@desk.test", "", "", forAdd.Token, forAdd.Options); }
   var forged = WebAuthn.TestGet(key, WebAuthn.RequestOptions(adding.Token, PasskeySite(), []), PasskeyOrigin(), handle, 9, true);
   runas (AuthBootstrap) { Assert.Contains("has expired", Assert.Throws<ValidationException>(() => SignInWithPasskey(adding.Token, forged)).Message); }
 }

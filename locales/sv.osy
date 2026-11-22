@@ -1518,12 +1518,6 @@ translations sv {
   /// shown through ValidationException
   error "There is an account for {address}, but it has not confirmed its address yet. We have sent a link to confirm it — then sign in with {provider} again, or sign in with your password." => "Det finns ett konto för {address}, men det har inte bekräftat sin adress än. Vi har skickat en länk för att bekräfta den. Logga sedan in med {provider} igen, eller logga in med ditt lösenord.";
 
-  // ── SignInWithTextedCode ──
-  /// SignInWithTextedCode · an error message
-  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
-  /// shown through ValidationException
-  error "{AccountsAppName} asks for an authenticator app on your account — a texted code is not enough. Sign in again to set one up." => "{AccountsAppName} kräver en autentiseringsapp på ditt konto, så en kod via sms räcker inte. Logga in igen för att ställa in en.";
-
   // ── SignUp ──
   /// SignUp · an error message
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)

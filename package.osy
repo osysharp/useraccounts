@@ -18,7 +18,7 @@
 //   account; only hashes of mailed tokens are stored. An app customises by DERIVING (`entity Employee : User { … }`) and
 //   by restyling the theme, and neither can loosen any of it.
 package Osysharp.UserAccounts {
-  version     "1.16.0";
+  version     "2.0.0";
   // Passkeys need the platform's `WebAuthn.*` checks, the browser's `Passkey.*` verbs and the five passkey sign-in slots;
   // the old address's "cancel the change" link needs the `EmailChangeCancel` slot, which no release before 0.15.1 has.
   minPlatform "0.24.0";

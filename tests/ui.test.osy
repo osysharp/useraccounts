@@ -356,9 +356,9 @@ void an_orgs_client_button_says_its_label() {
 }
 
 // A passkey made by a device the test plays (WebAuthn.TestCreate) — this browser stand-in has no authenticator of its
-// own, so here the page lists, renames and removes passkeys; the real browser's prompt is the visual suite's.
+// own, so here the page lists and renames passkeys and refuses a removal by password; the real browser's prompt is the visual suite's.
 [Test(Door)]
-void the_account_page_lists_renames_and_removes_a_passkey() {
+void the_account_page_lists_and_renames_a_passkey_and_keeps_it_past_a_password() {
   var key = WebAuthn.NewTestKey();
   PasskeyAdding first = new PasskeyAdding();
   runas (AuthBootstrap) { first = AddPasskey("ada@desk.test", "correct-horse-1"); }
@@ -374,9 +374,11 @@ void the_account_page_lists_renames_and_removes_a_passkey() {
   Ui.Click("Save");
   Assert.Visible("The passkey is renamed.");
   Assert.Visible("Work phone");
+  // A factor is removed only past a factor: the password alone is refused, and the passkey stays.
   Ui.Click("Remove…");
   Ui.Fill("Current password", "correct-horse-1");
   Ui.Click("Confirm");
-  Assert.Visible("\"Work phone\" no longer signs in to your account.");
-  Assert.Visible("No passkeys yet.");
+  Assert.Visible(UseYourFactor());
+  Assert.Hidden("\"Work phone\" no longer signs in to your account.");
+  runas (AuthBootstrap) { Assert.Equal(1, PasskeyCredential.Count(p => p.Account.Email == "ada@desk.test")); }
 }

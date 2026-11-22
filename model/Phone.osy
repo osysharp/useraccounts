@@ -42,8 +42,8 @@ public string ProvePhone(string email, string password, string phone, string cod
   var setup = App.Setting<AccountsSetup>();
   if (!PhonesOffered()) { throw new ValidationException($"{AccountsAppName()} does not keep phone numbers."); }
   var account = Verified(email, password);
+  RefuseWhileTheNumberIsTheStep(account);
   if (phone.Trim() == "") {
-    if (account.SmsSecondStep) { throw new ValidationException("Turn off text-message sign-in codes first — this number is your second step."); }
     if (account.TotpSecret != null) { RequireCode(account, twoStepCode); }
     if (account.Phone != null) {
       var old = account.Phone;
@@ -55,7 +55,6 @@ public string ProvePhone(string email, string password, string phone, string cod
   }
   if (!forTexts) {
     var number = KeptNumber(phone);
-    if (account.SmsSecondStep) { throw new ValidationException("Turn off text-message sign-in codes first — this number is your second step."); }
     if (account.TotpSecret != null) { RequireCode(account, twoStepCode); }
     if (account.Phone == number && account.PhoneVerifiedAt == null) { return ""; }
     // Nothing is texted: a number for calls is recorded as it stands, and from now on nothing texts it (`NumberToText`).
@@ -96,16 +95,22 @@ public string TextPhoneCode(User account, string phone) {
 /// one records the number and tells the account's address. Only a code texted for THIS account proves it: a code texted
 /// to the same number for another account is not one of this account's codes.
 public void ProvePhoneCode(User account, string phone, string code) {
+  RefuseWhileTheNumberIsTheStep(account);
   var number = KeptNumber(phone);
   var match = CodeMatching(LiveCodesOf(account, CodePurpose.ProvePhone, number), code);
   if (match == null) {
     UnitOfWork.Commit();   // the miss is kept: the throw below would discard it
     throw new ValidationException(WrongCode());
   }
-  // Moving the texted second step to a new number moves the step with it: the new number was just proven.
   account.Phone = number;
   account.PhoneVerifiedAt = DateTime.UtcNow;
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.PhoneChanged(account, number, true));
+}
+
+/// Throws the sentence to show when `account`'s number is its texted second step: that number is a factor, and moves only
+/// once the step is off — which asks for a code texted to it (SECURITY-INVARIANT accounts-a-factor-is-added-only-past-a-factor).
+void RefuseWhileTheNumberIsTheStep(User account) {
+  if (account.SmsSecondStep) { throw new ValidationException("Turn off text-message sign-in codes first — this number is your second step."); }
 }
 
 /// `phone` as the kit keeps it (E.164), for a number of either purpose, when the app keeps numbers — or the sentence to
@@ -226,6 +231,9 @@ public string SetSmsSecondStep(string email, string password, bool on, string co
       throw new ValidationException("Two-step sign-in with an authenticator app is on — that is already a stronger second step.");
     }
     if (!account.SmsSecondStep) {
+      // The password proves an account with no factor; one that holds a passkey is asked for it
+      // (SECURITY-INVARIANT accounts-a-factor-is-added-only-past-a-factor).
+      ProvenPastAFactor(email, password, "", "", "");
       account.SmsSecondStep = true;
       SendRendered(account.Email, setup.Mails.TextedStepChanged(account, true));
     }

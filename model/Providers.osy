@@ -5,7 +5,8 @@
 // tells it so). `SignInWithProvider` then decides, in this order:
 //   1. an identity already LINKED to an account signs in to that account;
 //   2. otherwise an account whose address the provider verified AND the account itself has proven is linked to it, and
-//      signs in — an address nobody has proven here is never enough to take an account over;
+//      signs in — an address nobody has proven here is never enough to take an account over (the platform's one rule,
+//      `Security.LinkOAuthByAddress`);
 //   3. otherwise, when the app lets visitors sign up, a new account is made for that address (proven already: the
 //      provider verified it); when it does not, the answer is `NoAccount`.
 // Whichever account it is, the rest of sign-in is the same as after a password: a code when two-step sign-in is on, or
@@ -40,7 +41,9 @@ public ProviderIdentity ProviderIdentityOf(string pendingToken) {
 /// SECURITY-INVARIANT(accounts-provider-matched-by-verified-address): a provider identity is attached to an existing
 /// account only when the provider verified the address AND the account has proven it here (`EmailVerifiedAt`) —
 /// never by an address alone. Else anybody could make an account in a victim's name with a password of their own, wait
-/// for the victim to "Continue with Google", and share the account. Guarded by tests/providers.test.osy.
+/// for the victim to "Continue with Google", and share the account. The platform judges it, the same rule as its own
+/// headless auto-link: `Security.LinkOAuthByAddress` links only a proven account (SECURITY-INVARIANT
+/// provider-link-by-address-needs-a-proven-account). Guarded by tests/providers.test.osy.
 [AuthMethod]
 public SignInStep SignInWithProvider(string pendingToken) {
   var linked = Security.PendingOAuthLinkedUser(pendingToken);
@@ -62,14 +65,13 @@ public SignInStep SignInWithProvider(string pendingToken) {
   var account = User.FirstOrDefault(u => u.Email == address);
   if (account != null) {
     if (!account.IsActive) { return new SignInStep(); }
-    if (account.EmailVerifiedAt == null) {
-      // The account has not proven the address; the provider's word is not enough to hand it over. Its owner gets a
-      // link (kept past the throw), and can link the provider from the account page once in.
+    if (!Security.LinkOAuthByAddress(account.Id, pendingToken)) {
+      // Nothing linked: the account has not proven the address, and the provider's word is not enough to hand it over.
+      // Its owner gets a link (kept past the throw), and can link the provider from the account page once in.
       EnsureVerification(account);
       UnitOfWork.Commit();
       throw new ValidationException($"There is an account for {address}, but it has not confirmed its address yet. We have sent a link to confirm it — then sign in with {provider} again, or sign in with your password.");
     }
-    Security.LinkOAuthFromPending(account.Id, pendingToken);
     SendRendered(account.Email, setup.Mails.ProviderLinked(account, provider));
     return ContinueSignInBy(account, ProviderWayOf(pendingToken));
   }
@@ -98,7 +100,7 @@ SignInStep SignUpWithProvider(string pendingToken, string address) {
   GrantNewAccountRoles(account, first);
   Security.LinkOAuthFromPending(account.Id, pendingToken);
   var via = ProviderWayOf(pendingToken);
-  if (setup.SecondFactor.Required(account)) { return MustEnrol(account, via); }
+  if (SecondFactorRequired(account)) { return EnrolOrAdmitByTheProvider(account, via); }
   return new SignInStep { Ticket = AdmitBy(account, via) };
 }
 

@@ -65,7 +65,14 @@ public entity User : Principal {
     // not a factor either. Guarded by tests/second-factor.test.osy.
     deny read TotpSecret when !IsAuthenticator;
     deny update TotpSecret when !IsAuthenticator && !ResetsSecondFactor;
-    deny update TotpLastStep when !IsAuthenticator && !ResetsSecondFactor;
+    // A presence spends the step its code was (`ProvePresence`), so the code proves nothing again; an administrator's
+    // reset of a lost second factor (`ClearSecondFactor`, judged for the manager) sets it back with the rest, and an
+    // erasure (`ForgetSecondFactorStep`, called by `EraseAccount` alone) forgets it with the key.
+    deny update TotpLastStep when !IsAuthenticator && !ResetsSecondFactor
+      except via ProvePresence, ClearSecondFactor, ForgetSecondFactorStep;
+    // A presence asks the signed-in account's own password and authenticator code: these two read its own row, past the
+    // masks, and answer only whether it fits (SECURITY-INVARIANT presence-proof-is-single-use-and-bound-to-its-act).
+    allow read via PresencePasswordFits, PresenceCodeStep;
     deny update SecondFactorOnAt when !IsAuthenticator && !ResetsSecondFactor;
     // SECURITY-INVARIANT(accounts-phone-is-proven-by-a-code): a phone number is written by the sign-in flow alone — a number
     // for texts after a code texted to it came back, so no account can claim a number it does not hold, and with it the
@@ -190,6 +197,19 @@ public class AccountsSetup {
   /// Who must use two-step sign-in (a code from an authenticator app after the password). Anybody may turn it on from
   /// the account page; derive and override `Required` to say who MUST — e.g. every admin.
   public SecondFactorPolicy SecondFactor = new SecondFactorPolicy();
+  /// Every account must use two-step sign-in — an authenticator app, a passkey, or (with `ProviderFactorCounts`) the
+  /// provider's own second factor; a texted code never counts. Off by default. An account without one is taken through
+  /// setting it up at sign-in; one that has one uses it. The platform's one ticket mint holds every ticket of the app to it,
+  /// whichever door asks — the app's own, and the platform's password and provider doors: under it only this kit's sign-in
+  /// mints one.
+  [OrgPolicy(OrgPolicyMode.Lock, Name = "Two-step sign-in for everyone", Area = OrgPolicyArea.SignIn)] public bool SecondFactorForAll = false;
+  /// How long a sign-in lasts at most, in hours (1–12): every ticket, and every renewal of it, ends that long after the
+  /// sign-in. 12, the default, is the installation's own limit and adds no end. An organisation's range only lowers it.
+  [OrgPolicy(OrgPolicyMode.Range, Name = "Sign-in lasts at most (hours)", Area = OrgPolicyArea.SignIn)] public int SignInHours = 12;
+  /// The provider's own second factor stands in for the app's when the account is bound to a Microsoft tenant or an
+  /// organisation's own sign-in client (`ProviderOnly`), this sign-in came through it, and the provider says it asked for a
+  /// second factor just now. Never Google's: its token does not say. Off by default.
+  [OrgPolicy(OrgPolicyMode.Lock, Name = "Provider's second factor counts", Area = OrgPolicyArea.SignIn)] public bool ProviderFactorCounts = false;
   /// What happens around an account's sign-in that is the app's own business — a sign-in history, a welcome. Derive
   /// and override (`Events = new MyEvents()`); by default nothing.
   public AccountEvents Events = new AccountEvents();
@@ -401,6 +421,16 @@ public AccountsFacts AccountsPageFacts() {
     Phones = PhonesOffered(), SmsSignIn = setup.SmsSignIn, SmsSecondStep = setup.SmsSecondStep,
     Marks = ProviderMarksOf(OfferedSignInProviders()),
   };
+}
+
+/// Does `password` fit the signed-in account's own password, for a presence (`ProvePresence`)? False for an account with
+/// none, after the same time spent.
+bool PresencePasswordFits(string password) {
+  var me = Session.CurrentUser;
+  if (me == null) { Security.VerifyPassword(password); return false; }
+  var account = User.Single(u => u.Id == me.Id);
+  if (account.PasswordHash == null) { Security.VerifyPassword(password); return false; }
+  return Security.VerifyPassword(password, account.PasswordHash);
 }
 
 /// The signed-in account, or null.

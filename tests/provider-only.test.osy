@@ -80,10 +80,10 @@ void code_step_keeps_the_provider_way() {
   Assert.NotEqual("", step.Challenge);
   Assert.Equal("", step.Ticket);
   string ticket = "";
-  runas (AuthBootstrap) { ticket = SignInWithCode(step.Challenge, Totp.Code(totp, DateTime.UtcNow.AddSeconds(30))); }
+  runas (AuthBootstrap) { ticket = SignInWithCode(step.Challenge, Totp.Code(totp, DateTime.UtcNow.AddSeconds(30))).Ticket; }
   Assert.NotEqual("", ticket);
   // The password's code step kept its way too: a right code (a recovery code) is refused at the ticket.
-  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithCode(byPassword, spare)).Message); }
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithCode(byPassword, spare).Ticket).Message); }
   // …and so is the password's enrolment; Google's enrolment admits.
   var key = NewSecondFactorSetup("root@acme.test").Key;
   runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => EnableSecondFactor("", "", key, Totp.Code(key), enrolledByPassword)).Message); }
@@ -299,14 +299,14 @@ void texted_step_keeps_the_way_of_the_first() {
   runas (AuthBootstrap) { code = TextedCode("+46700000012"); }
   AcmeSignsInWithGoogle();
   // The password's texted step: the right code is refused at the ticket.
-  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithCode(byPassword.Challenge, code)).Message); }
+  runas (AuthBootstrap) { Assert.Equal(Said(), Assert.Throws<ValidationException>(() => SignInWithCode(byPassword.Challenge, code).Ticket).Message); }
   // Google with Acme's domain: a texted step, and its code admits.
   SignInStep byGoogle = new SignInStep();
   runas (AuthBootstrap) { byGoogle = SignInWithProvider(TestOAuth.PendingToken("ada@acme.test", "Google", "", "acme.test")); }
   Assert.Equal("sms", byGoogle.ChallengeBy);
   runas (AuthBootstrap) { code = TextedCode("+46700000012"); }
   string ticket = "";
-  runas (AuthBootstrap) { ticket = SignInWithCode(byGoogle.Challenge, code); }
+  runas (AuthBootstrap) { ticket = SignInWithCode(byGoogle.Challenge, code).Ticket; }
   Assert.NotEqual("", ticket);
 }
 
@@ -340,7 +340,7 @@ void the_challenge_token_is_unreadable() {
   // …nor the account itself.
   runas (AcmeAda) { Assert.Equal(0, SignInChallenge.Count(c => c.PendingToken != null)); }
   // Spent: the code admits, and the token is gone.
-  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithCode(first.Challenge, Totp.Code(key, DateTime.UtcNow.AddSeconds(30)))); }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithCode(first.Challenge, Totp.Code(key, DateTime.UtcNow.AddSeconds(30))).Ticket); }
   runas (AuthBootstrap) { Assert.Null(SignInChallenge.Single(c => c.TokenHash == hash).PendingToken); }
   // Lapsed: a challenge presented after its five minutes is refused, and its token is gone.
   SignInStep second = new SignInStep();
@@ -348,7 +348,7 @@ void the_challenge_token_is_unreadable() {
   var lapsed = TokenHash(second.Challenge);
   runas (AuthBootstrap) { Assert.NotNull(SignInChallenge.Single(c => c.TokenHash == lapsed).PendingToken); }
   TestClock.Set(DateTime.UtcNow.AddMinutes(6));
-  runas (AuthBootstrap) { Assert.Throws<ValidationException>(() => SignInWithCode(second.Challenge, Totp.Code(key, DateTime.UtcNow))); }
+  runas (AuthBootstrap) { Assert.Throws<ValidationException>(() => SignInWithCode(second.Challenge, Totp.Code(key, DateTime.UtcNow)).Ticket); }
   runas (AuthBootstrap) { Assert.Null(SignInChallenge.Single(c => c.TokenHash == lapsed).PendingToken); }
 }
 
@@ -363,15 +363,25 @@ void an_insiders_seal_links_nothing_in_the_kit() {
 
 /// Gives `email` (password `password`) a passkey made while no rule binds it, and answers a sign-in answer for it.
 string PasskeyAnswerFor(string email, string password, PasskeyStart start) {
+  return AnswerWith(AddKeyByPassword(email, password), email, start, 1);
+}
+
+/// A new passkey on `email`'s account, added by its password (the account holds no factor yet): its test key.
+string AddKeyByPassword(string email, string password) {
   var key = WebAuthn.NewTestKey();
   PasskeyAdding first = new PasskeyAdding();
   runas (AuthBootstrap) { first = AddPasskey(email, password); }
   runas (AuthBootstrap) {
     AddPasskey(email, "", "", "", "", "", first.Token, WebAuthn.TestCreate(key, first.Options, PasskeyOrigin()), "YubiKey");
   }
+  return key;
+}
+
+/// The device's answer to `start` with `key`, a passkey of `email`'s account, at the counter `count`.
+string AnswerWith(string key, string email, PasskeyStart start, long count) {
   string handle = "";
   runas (AuthBootstrap) { handle = PasskeyHandle(User.Single(u => u.Email == email)); }
-  return WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, 1, true);
+  return WebAuthn.TestGet(key, start.Options, PasskeyOrigin(), handle, count, true);
 }
 
 [Test(AcmeDesk)]
@@ -394,8 +404,9 @@ void break_glass_does_not_open_an_org_app() {
   PasskeyStart toAdmin = new PasskeyStart();
   PasskeyStart toTheApp = new PasskeyStart();
   runas (AuthBootstrap) { toAdmin = StartPasskeySignIn(); toTheApp = StartPasskeySignIn(); }
-  var intoAdmin = PasskeyAnswerFor("bo@desk.test", "battery-staple-2", toAdmin);
-  var intoTheApp = PasskeyAnswerFor("bo@desk.test", "battery-staple-2", toTheApp);
+  var key = AddKeyByPassword("bo@desk.test", "battery-staple-2");
+  var intoAdmin = AnswerWith(key, "bo@desk.test", toAdmin, 1);
+  var intoTheApp = AnswerWith(key, "bo@desk.test", toTheApp, 2);
   DeskBindsItsOwn.Stub(() => true);
   DeskWaivesPasskeys.Stub(() => true);
   SignInStep step = new SignInStep();

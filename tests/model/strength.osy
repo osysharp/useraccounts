@@ -1,0 +1,37 @@
+// The desk's switches for how strong a sign-in must be (tests/sign-in-strength.test.osy), and two doors of the desk's own
+// that mint a ticket without the kit — what the platform's mint must refuse under the two-step rule.
+using Osysharp.Identity;
+using Osysharp.UserAccounts;
+
+/// Whether every account must use two-step sign-in (`AccountsSetup.SecondFactorForAll`) — no, until a test says so.
+bool DeskStepForAll() { return false; }
+
+/// How long a sign-in lasts at most (`AccountsSetup.SignInHours`) — the installation's 12, until a test says otherwise.
+int DeskSignInHours() { return 12; }
+
+/// Whether the provider's own second factor counts (`AccountsSetup.ProviderFactorCounts`) — no, until a test says so.
+bool DeskProviderFactorCounts() { return false; }
+
+/// Whether the desk's own rule asks two-step sign-in of its desk.test accounts — no, until a test says so.
+bool DeskStepForItsOwn() { return false; }
+
+/// The hours the desk's own rule gives its desk.test accounts — 12 (nothing added), until a test says otherwise.
+int DeskOwnHours() { return 12; }
+
+/// The desk's own door: a password checked by the desk itself, and a ticket minted straight away, past the kit.
+public string DeskOwnSignIn(string email, string password) {
+  var account = User.FirstOrDefault(u => u.Email == email);
+  if (account == null || account.PasswordHash == null || !Security.VerifyPassword(password, account.PasswordHash)) { return ""; }
+  DateTime? none = null;
+  return Security.IssueJwt(account.Id, account.Email, none, "app");
+}
+
+/// The same door through a function of the desk's own that is named like the kit's `Mint`.
+public string DeskOwnMintSignIn(string email, string password) {
+  var account = User.FirstOrDefault(u => u.Email == email);
+  if (account == null || account.PasswordHash == null || !Security.VerifyPassword(password, account.PasswordHash)) { return ""; }
+  return Mint(account);
+}
+
+string Mint(User account) { DateTime? none = null;
+  return Security.IssueJwt(account.Id, account.Email, none, "app"); }

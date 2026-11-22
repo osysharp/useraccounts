@@ -165,3 +165,99 @@ public component AccountStepUpMail(User account, string code, CodePurpose purpos
     }
   }
 }
+
+// ── presence: a person, now, for one named act ───────────────────────────────────────────────────────────────────
+
+/// Proof, once, that the signed-in PERSON is acting, for one named act (an approval, a seat given): made by `ProvePresence`
+/// from a user-verified passkey or the password and a current authenticator code, taken by `TakePresence`. Only the proof's
+/// hash is kept. A ticket's claims are never presence: every ticket an agent's grant mints carries them.
+///
+/// SECURITY-INVARIANT(presence-proof-is-single-use-and-bound-to-its-act): a presence proof is made only by `ProvePresence`
+/// for the signed-in account, from a user-verified passkey answer to a ceremony started for that account and act, or from
+/// its password and an unused authenticator code under the kit's lockout; never from a texted or mailed code, a recovery
+/// code, a provider, or a ticket's claims. It is stored hashed, lives five minutes, and `TakePresence` accepts it once,
+/// for the same account and act, of any number of takes at the same moment, and deletes it. A sign-out everywhere, a new
+/// password and a reset second step end the account's live proofs. A presence ceremony is never a sign-in, and a sign-in
+/// ceremony is never presence. Guarded by kits/user-accounts/tests/presence.test.osy and
+/// Platform.Tests PresenceTakenOnceUnderARaceTests.
+public entity PresenceProof {
+  [Required, Immutable] User Account;
+  /// The act's hash (`PresenceActHash`).
+  [Required, Immutable, MaxLength(64)] string ActHash;
+  [Required, Immutable, Unique, MaxLength(64)] string TokenHash;
+  /// The step that proved it: "passkey" or "app" (`StepCountsAsPresence`).
+  [Required, Immutable, MaxLength(10)] string Way;
+  [Required, Immutable] DateTime ExpiresAt;
+  /// Taken once: of two takes at the same moment, one update lands and the other is refused at its commit.
+  [ConcurrencyCheck] DateTime? TakenAt;
+  security {
+    allow create when IsAuthenticated where Account == user;
+    allow update TakenAt when IsAuthenticated where Account == user;
+    allow delete when IsAuthenticated where Account == user;
+    // A sign-out everywhere, a new password and a reset second step end the account's live proofs (`EndPresenceOf`).
+    allow read, delete when IsAuthenticator || ResetsSecondFactor;
+    allow read via TakePresence, DropSpentPresence;
+    deny create except via ProvePresence;
+    deny update except via TakePresence;
+    deny delete except via TakePresence, EndPresenceOf, DropSpentPresence;
+  }
+}
+
+/// Who ends an account's live proofs: the sign-in flow, and the run that resets a second step.
+policy EndsPresence => IsAuthenticator || ResetsSecondFactor;
+
+/// How long a presence proof, and the passkey ceremony that makes one, may wait.
+public TimeSpan PresenceLifetime() { return TimeSpan.FromMinutes(5); }
+
+/// The longest act a presence is proven for.
+public int PresenceActLength() { return 200; }
+
+/// What is kept of an act: its hash.
+public string PresenceActHash(string act) { return Crypto.Sha256Hex("presence:" + act); }
+
+/// Take a presence proof for `act`: true once, for the signed-in account that proved it, for that act, within five minutes
+/// — and it is spent. Call it as the signed-in caller, before any `runas`: a run as an actor or the system has nobody signed
+/// in, and its answer is false.
+[Authorize(IsAuthenticated)]
+[SuppressWarning("security-read-via-asks-about-one-row")]   // a proof is asked about by its own token, for the signed-in account only
+public bool TakePresence(string proof, string act) {
+  var me = Session.CurrentUser;
+  if (me == null || proof.Trim() == "") { return false; }
+  var now = DateTime.UtcNow;
+  var held = PresenceProof.FirstOrDefault(p => p.TokenHash == TokenHash(proof));
+  if (held == null || held.TakenAt != null || held.ExpiresAt <= now || held.Account.Id != me.Id
+      || held.ActHash != PresenceActHash(act)) {
+    return false;
+  }
+  try {
+    held.TakenAt = now;
+    UnitOfWork.Commit();
+  } catch (ConflictException e) {
+    UnitOfWork.Discard();   // another take landed a moment before this one
+    return false;
+  }
+  held.Delete();
+  UnitOfWork.Commit();
+  return true;
+}
+
+/// End every presence proof the account `accountId` holds, taken or not: after a sign-out everywhere, a new password or a reset second
+/// step, no proof made before it approves anything. Runs where the sign-in flow or a second step's reset runs.
+[Authorize(EndsPresence)]
+[SuppressWarning("cost-unbounded-read")]   // one account's proofs, each alive five minutes
+public void EndPresenceOf(Guid accountId) {
+  foreach (var proof in PresenceProof.Where(p => p.Account.Id == accountId).ToList()) { proof.Delete(); }
+}
+
+/// Delete the signed-in account's lapsed proofs: `ProvePresence` asks it before it writes a new one.
+[Authorize(IsAuthenticated), CommitsAlone]
+[SuppressWarning("cost-unbounded-read")]   // one account's lapsed proofs, gone each time it proves again
+[SuppressWarning("security-read-via-asks-about-one-row")]   // the lapsed proofs of the signed-in account only
+void DropSpentPresence() {
+  var me = Session.CurrentUser;
+  if (me == null) { return; }
+  var now = DateTime.UtcNow;
+  foreach (var old in PresenceProof.Where(p => p.Account.Id == me.Id && (p.TakenAt != null || p.ExpiresAt <= now)).ToList()) {
+    old.Delete();
+  }
+}

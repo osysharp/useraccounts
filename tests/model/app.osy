@@ -33,6 +33,9 @@ app.Accounts = new AccountsSetup {
   // lock (review M1/D1). The lock is judged anyway (`an_app_override_cannot_unbind`). A test may have it ADD a binding of
   // the desk's own accounts (`DeskBindsItsOwn`, `an_override_may_add_a_binding`).
   SignInRules = new DeskOwnRules(),
+  // Two-step sign-in for nobody in particular, hours at the installation's, and no provider factor — until a test says
+  // (tests/sign-in-strength.test.osy).
+  SecondFactorForAll = DeskStepForAll(), SignInHours = DeskSignInHours(), ProviderFactorCounts = DeskProviderFactorCounts(),
 };
 
 /// An app's override of the sign-in rule: it binds nobody, unless a test stubs `DeskBindsItsOwn` — then desk.test
@@ -45,6 +48,9 @@ public class DeskOwnRules : SignInRulePolicy {
     return null;
   }
   public override bool Waives(User account, string passkey) { return DeskWaivesPasskeys(); }
+  // What the desk's own rule adds for its desk.test accounts: two-step sign-in, and fewer hours — until a test says.
+  public override bool SecondFactorForAll(User account) { return DeskStepForItsOwn() && account.Email.EndsWith("@desk.test"); }
+  public override int SignInHours(User account) { return account.Email.EndsWith("@desk.test") ? DeskOwnHours() : 12; }
 }
 
 /// Whether the desk's own rule binds its desk.test accounts to Google — no, until a test says so.

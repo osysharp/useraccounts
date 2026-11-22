@@ -38,7 +38,7 @@ void with_two_step_on_a_password_alone_answers_a_challenge_and_no_ticket() {
   Assert.NotEqual("", step.Challenge);
   Assert.False(step.MustEnrol);
   string ticket = "";
-  runas (AuthBootstrap) { ticket = SignInWithCode(step.Challenge, NextCode(key)); }
+  runas (AuthBootstrap) { ticket = SignInWithCode(step.Challenge, NextCode(key)).Ticket; }
   Assert.NotEqual("", ticket);
   // …and the password alone still answers nothing to sign in with, however often it is asked.
   runas (AuthBootstrap) { Assert.Equal("", SignIn("ada@desk.test", "correct-horse-1").Ticket); }
@@ -79,16 +79,16 @@ void a_wrong_code_is_refused_and_a_used_code_is_refused_again() {
   string challenge = "";
   runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
   runas (AuthBootstrap) {
-    Assert.Equal("", SignInWithCode(challenge, WrongCode(key)));
-    Assert.Equal("", SignInWithCode(challenge, first));          // enrolment spent it: a replay
+    Assert.Equal("", SignInWithCode(challenge, WrongCode(key)).Ticket);
+    Assert.Equal("", SignInWithCode(challenge, first).Ticket);          // enrolment spent it: a replay
   }
   var next = NextCode(key);
   string ticket = "";
-  runas (AuthBootstrap) { ticket = SignInWithCode(challenge, next); }
+  runas (AuthBootstrap) { ticket = SignInWithCode(challenge, next).Ticket; }
   Assert.NotEqual("", ticket);
   // The code that just signed in is spent too — on a fresh challenge it is refused.
   string again = "x";
-  runas (AuthBootstrap) { again = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, next); }
+  runas (AuthBootstrap) { again = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, next).Ticket; }
   Assert.Equal("", again);
 }
 
@@ -100,8 +100,8 @@ void a_challenge_is_single_use() {
   runas (AuthBootstrap) { codes = NewRecoveryCodes("ada@desk.test", "correct-horse-1", NextCode(key)); }
   string challenge = "";
   runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
-  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithCode(challenge, codes[0])); }
-  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(challenge, codes[1])); }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithCode(challenge, codes[0]).Ticket); }
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(challenge, codes[1]).Ticket); }
 }
 
 [Test(TwoStepDesk)]
@@ -110,15 +110,15 @@ void a_recovery_code_signs_in_once_and_the_owner_is_told() {
   SecondFactorOn on = new SecondFactorOn();
   runas (AuthBootstrap) { on = EnableSecondFactor("ada@desk.test", "correct-horse-1", key, Totp.Code(key)); }
   string ticket = "";
-  runas (AuthBootstrap) { ticket = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, on.RecoveryCodes[0]); }
+  runas (AuthBootstrap) { ticket = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, on.RecoveryCodes[0]).Ticket; }
   Assert.NotEqual("", ticket);
   string again = "x";
-  runas (AuthBootstrap) { again = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, on.RecoveryCodes[0]); }
+  runas (AuthBootstrap) { again = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, on.RecoveryCodes[0]).Ticket; }
   Assert.Equal("", again);
   // Typed as a person types it — upper-case, spaced — another code still works.
   string typed = "";
   runas (AuthBootstrap) {
-    typed = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, " " + on.RecoveryCodes[1].ToUpper().Replace("-", " - "));
+    typed = SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, " " + on.RecoveryCodes[1].ToUpper().Replace("-", " - ")).Ticket;
   }
   Assert.NotEqual("", typed);
   runas (AuthBootstrap) { Assert.Equal(2, MailsTo("ada@desk.test", "A recovery code was used")); }
@@ -132,10 +132,10 @@ void a_challenge_dies_at_its_fifth_wrong_code() {
   string challenge = "";
   runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
   for (var i = 0; i < 5; i++) {
-    runas (AuthBootstrap) { Assert.Equal("", SignInWithCode(challenge, WrongCode(key))); }
+    runas (AuthBootstrap) { Assert.Equal("", SignInWithCode(challenge, WrongCode(key)).Ticket); }
   }
   // The right code, on the spent challenge: refused — sign-in starts again from the password.
-  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(challenge, NextCode(key))); }
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(challenge, NextCode(key)).Ticket); }
 }
 
 [Test(TwoStepDesk)]
@@ -147,12 +147,12 @@ void ten_wrong_codes_stop_every_code_for_the_account_a_right_one_included() {
     string challenge = "";
     runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
     for (var i = 0; i < 5; i++) {
-      runas (AuthBootstrap) { Assert.Equal("", SignInWithCode(challenge, WrongCode(key))); }
+      runas (AuthBootstrap) { Assert.Equal("", SignInWithCode(challenge, WrongCode(key)).Ticket); }
     }
   }
   string last = "";
   runas (AuthBootstrap) { last = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
-  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(last, NextCode(key))); }
+  runas (AuthBootstrap) { Assert.Throws(() => SignInWithCode(last, NextCode(key)).Ticket); }
   // …and the changes that take a code are held by the same limit.
   runas (AuthBootstrap) { Assert.Throws(() => DisableSecondFactor("ada@desk.test", "correct-horse-1", NextCode(key))); }
 }
@@ -271,10 +271,10 @@ void new_recovery_codes_spend_the_old_ones() {
   runas (AuthBootstrap) { fresh = NewRecoveryCodes("ada@desk.test", "correct-horse-1", NextCode(key)); }
   Assert.Equal(10, fresh.Count);
   runas (AuthBootstrap) {
-    Assert.Equal("", SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, on.RecoveryCodes[0]));
+    Assert.Equal("", SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, on.RecoveryCodes[0]).Ticket);
   }
   runas (AuthBootstrap) {
-    Assert.NotEqual("", SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, fresh[0]));
+    Assert.NotEqual("", SignInWithCode(SignIn("ada@desk.test", "correct-horse-1").Challenge, fresh[0]).Ticket);
   }
 }
 
@@ -290,5 +290,5 @@ void a_code_is_judged_by_the_runs_own_clock() {
   Assert.NotEqual("", on.Ticket);
   string challenge = "";
   runas (AuthBootstrap) { challenge = SignIn("ada@desk.test", "correct-horse-1").Challenge; }
-  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithCode(challenge, Totp.Code(key, DateTime.UtcNow.AddSeconds(30)))); }
+  runas (AuthBootstrap) { Assert.NotEqual("", SignInWithCode(challenge, Totp.Code(key, DateTime.UtcNow.AddSeconds(30))).Ticket); }
 }

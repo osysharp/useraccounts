@@ -141,16 +141,25 @@ public entity RecoveryCode {
 public entity SecondFactorMiss {
   [Required] User Account;
   [Required] DateTime At;
-  security { allow read, create when IsAuthenticator; }
+  security {
+    allow read, create when IsAuthenticator;
+    // A presence (`ProvePresence`) runs as the signed-in account: it asks its own lockout and counts its own misses.
+    allow read, create when IsAuthenticated where Account == user;
+    // Only the code checks write a miss: `RecordMiss`, which every code check calls (the sign-in flow's, a step-up's, a
+    // change that asks a code), and `ProvePresence`'s own. A session on the account writing one of its own would lock the
+    // account's second step for a quarter of an hour.
+    deny create when !IsAuthenticator except via ProvePresence, RecordMiss;
+  }
 }
 
 // ── the flows ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /// The second step: a challenge `SignIn` answered, and a code — the authenticator app's, or a recovery code; or, for an
-/// account that chose a texted code as its second step, the code texted to its phone. Answers a ticket, or "" for a code
-/// that does not fit; throws the sentence to show when the challenge is spent or the account has had too many wrong codes.
+/// account that chose a texted code as its second step, the code texted to its phone. Answers a `SignInStep`: its `Ticket`,
+/// or an empty step for a code that does not fit; throws the sentence to show when the challenge is spent or the account has
+/// had too many wrong codes.
 [AuthMethod]
-public string SignInWithCode(string challenge, string code) {
+public SignInStep SignInWithCode(string challenge, string code) {
   var pending = SignInChallenge.FirstOrDefault(c => c.TokenHash == TokenHash(challenge));
   var now = DateTime.UtcNow;
   if (pending == null || pending.UsedAt != null || pending.ExpiresAt < now || !pending.Account.IsActive
@@ -165,24 +174,18 @@ public string SignInWithCode(string challenge, string code) {
     pending.Misses = pending.Misses + 1;
     if (pending.Misses >= ChallengeMissesAllowed()) { SpendChallenge(pending); }
     RecordMiss(account);
-    return "";
+    return new SignInStep();
   }
   var via = WayOfChallenge(pending);
+  via.SecondStep = "app";
   SpendChallenge(pending);
-  return AdmitBy(account, via);
+  return new SignInStep { Ticket = AdmitBy(account, via) };
 }
 
 /// The texted half of a sign-in: the code sent to the account's phone for this challenge.
 [SuppressWarning("cost-unbounded-read")]   // one challenge's live code — a resend spends the one before it
-string SignInWithTextedCode(SignInChallenge pending, string code) {
+SignInStep SignInWithTextedCode(SignInChallenge pending, string code) {
   var account = pending.Account;
-  // SECURITY-INVARIANT(accounts-sms-is-not-a-required-second-factor) — the second check: a texted code never lets in an
-  // account the app requires a second factor of, even one whose challenge was made before the app came to require it.
-  if (App.Setting<AccountsSetup>().SecondFactor.Required(account)) {
-    SpendChallenge(pending);
-    UnitOfWork.Commit();
-    throw new ValidationException($"{AccountsAppName()} asks for an authenticator app on your account — a texted code is not enough. Sign in again to set one up.");
-  }
   // Only the challenge's live code — a resent one spent the code before it, which can no longer match.
   var now = DateTime.UtcNow;
   var match = CodeMatching(OneTimeCode.Where(c => c.Challenge == pending && c.Purpose == CodePurpose.SecondStep && c.UsedAt == null
@@ -190,11 +193,22 @@ string SignInWithTextedCode(SignInChallenge pending, string code) {
   if (match == null) {
     pending.Misses = pending.Misses + 1;
     if (pending.Misses >= ChallengeMissesAllowed()) { SpendChallenge(pending); }
-    return "";
+    return new SignInStep();
   }
   var via = WayOfChallenge(pending);
   SpendChallenge(pending);
-  return AdmitBy(account, via);
+  // SECURITY-INVARIANT(accounts-sms-is-not-a-required-second-factor) — the second check: a texted code never lets in an
+  // account that must use two-step sign-in, even one whose challenge was made before it had to. Past its texted step it sets
+  // a factor that counts up (SECURITY-INVARIANT accounts-a-factor-is-added-only-past-a-factor).
+  if (!StepMeetsTheRule(account, "sms")) {
+    if (HoldsASecondFactor(account)) {
+      UnitOfWork.Commit();
+      throw new ValidationException(UseYourFactor());
+    }
+    return MustEnrol(account, via);
+  }
+  via.SecondStep = "sms";
+  return new SignInStep { Ticket = AdmitBy(account, via) };
 }
 
 /// A fresh key for an authenticator app, and its QR code — labelled with `email` so the phone's list says which account
@@ -208,11 +222,15 @@ public SecondFactorSetup NewSecondFactorSetup(string email) {
 
 /// Turn two-step sign-in on: the account's address and password — or, straight after a sign-in that answered
 /// `MustEnrol`, its `Enrolment` token in their place (a provider sign-in has no password to ask for again) — the key
-/// `NewSecondFactorSetup` gave, and the code the authenticator app now shows. Answers a ticket and the recovery codes,
-/// or throws the sentence to show.
+/// `NewSecondFactorSetup` gave, and the code the authenticator app now shows. An account that already signs in with a passkey
+/// confirms with one of them (`passkeyToken` + `passkeyResponse`, a confirmation `StartPasskeySignIn` began) in place of the
+/// password; one whose second step is a texted code sets it up past that text, at the sign-in's enrolment
+/// (SECURITY-INVARIANT accounts-a-factor-is-added-only-past-a-factor). Answers a ticket and the recovery codes, or throws
+/// the sentence to show.
 [AuthMethod]
-public SecondFactorOn EnableSecondFactor(string email, string password, string key, string code, string enrolment = "") {
-  var account = enrolment != "" ? Enrolling(enrolment) : Verified(email, password);
+public SecondFactorOn EnableSecondFactor(string email, string password, string key, string code, string enrolment = "",
+                                         string passkeyToken = "", string passkeyResponse = "") {
+  var account = enrolment != "" ? Enrolling(enrolment) : ProvenPastAFactor(email, password, "", passkeyToken, passkeyResponse);
   var via = enrolment != "" ? WayOfEnrolment(enrolment) : NotThroughAProvider();
   // Before the factor is kept: a sign-in the rule refuses sets nothing up on the account.
   RefuseOffTheRule(account, via);
@@ -234,6 +252,8 @@ public SecondFactorOn EnableSecondFactor(string email, string password, string k
   account.SecondFactorOnAt = DateTime.UtcNow;
   var codes = IssueRecoveryCodes(account);
   SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.SecondFactorOn(account));
+  // The code just checked against the new key is this sign-in's second step.
+  via.SecondStep = "app";
   return new SecondFactorOn { Ticket = AdmitBy(account, via), RecoveryCodes = codes };
 }
 
@@ -270,7 +290,7 @@ public SecondFactorFacts MySecondFactor() {
   var me = Me();
   if (me == null) { return new SecondFactorFacts(); }
   return new SecondFactorFacts {
-    On = me.SecondFactorOnAt != null, Required = App.Setting<AccountsSetup>().SecondFactor.Required(me),
+    On = me.SecondFactorOnAt != null, Required = SecondFactorRequired(me),
     OnSince = me.SecondFactorOnAt, RecoveryCodesLeft = RecoveryCode.Count(r => r.Account == me && r.UsedAt == null),
   };
 }
@@ -284,6 +304,7 @@ public SecondFactorFacts MySecondFactor() {
 ///   flow, or a run that writes as the system — and Osysharp.UserManagement reaches it only through an audited access change
 ///   that the app's people managers alone may make (SECURITY-INVARIANT(people-access-changes-are-recorded-and-the-managers-alone)).
 [SuppressWarning("cost-unbounded-read")]   // one account's unspent recovery codes and open sign-in challenges
+[Authorize(ResetsSecondFactor)]
 public void ClearSecondFactor(User account) {
   var now = DateTime.UtcNow;
   account.TotpSecret = null;
@@ -328,7 +349,53 @@ User Enrolling(string enrolment) {
     if (pending != null && pending.PendingToken != null) { pending.PendingToken = null; UnitOfWork.Commit(); }
     throw new ValidationException("That sign-in has expired — start again from the sign-in page.");
   }
+  // An enrolment is for an account with no second factor yet: one that has one since uses it (SECURITY-INVARIANT
+  // accounts-a-factor-is-added-only-past-a-factor).
+  if (HoldsASecondFactor(pending.Account)) {
+    SpendChallenge(pending);
+    UnitOfWork.Commit();
+    throw new ValidationException(UseYourFactor());
+  }
   return pending.Account;
+}
+
+/// Does `account` hold a second factor of its own — an authenticator app, or a passkey? Such an account signs in, and adds
+/// another factor, only past one of them.
+///
+/// SECURITY-INVARIANT(accounts-a-factor-is-added-only-past-a-factor): an account that holds a second factor is never offered
+/// the enrolment a sign-in answers `MustEnrol` with, and no factor is added to it or removed from it on its password alone: an
+/// enrolment token is refused for it, adding an authenticator or a passkey asks one of its own factors first, and so does
+/// removing one (a passkey: that passkey or another factor it holds; the authenticator: its code). A texted step is such a
+/// factor here: an account that holds one passes it before it is offered the enrolment, its password alone adds no
+/// authenticator and no passkey (`PasswordProvesNoFactor`), and its number does not move while it is the step. Every function
+/// that writes a factor proves the account through `ProvenPastAFactor` or an enrolment. Otherwise whoever has the password
+/// removes the factor or skips the text, enrols a factor of their own, and the two-step rule the account's own factor was
+/// meeting asks nothing more than the password. Guarded by tests/sign-in-strength.test.osy (a_passkey_account_cannot_enrol_by_password,
+/// adding_a_factor_needs_a_passed_factor, a_code_account_cannot_enrol_again, an_sms_account_texts_before_it_enrols,
+/// removing_a_factor_needs_a_passed_factor, an_sms_account_cannot_enable_totp_by_password,
+/// an_sms_account_cannot_add_a_passkey_by_password, a_passkey_account_cannot_add_texts_by_password,
+/// an_sms_number_moves_not_by_password) and Platform.Tests' FactorWriteGuardTests.
+bool HoldsASecondFactor(User account) {
+  return account.TotpSecret != null || PasskeyCredential.Any(p => p.Account == account);
+}
+
+/// `account`, proven by its password alone — refused when it holds a second factor or a texted step, which is asked instead.
+User PasswordProvesNoFactor(User account) {
+  if (HoldsASecondFactor(account)) { throw new ValidationException(UseYourFactor()); }
+  if (TextedSecondStep(account)) { throw new ValidationException(UseYourTextedStep()); }
+  return account;
+}
+
+/// The sentence for an account whose second step is a texted code and that was asked for less: turning that step off
+/// asks for a texted code, and under a rule that asks for a factor that counts, the sign-in itself texts first and then
+/// sets one up.
+string UseYourTextedStep() {
+  return "This account's second step is a code texted to its phone — turn texted sign-in codes off first (that texts you a code), then set this up.";
+}
+
+/// The sentence for an account that holds a second factor and was asked for less.
+string UseYourFactor() {
+  return "This account signs in with its passkey or authenticator app — use it to go on.";
 }
 
 void SpendEnrolment(string enrolment) {
@@ -366,11 +433,85 @@ string Admit(User account) { return AdmitBy(account, NotThroughAProvider()); }
 /// that organisation (SECURITY-INVARIANT provider-only-on-every-door).
 [Authorize(IsAuthenticator)]
 internal string AdmitBy(User account, SignInWay via) {
-  RefuseOffTheRule(account, via);
+  var ticket = Mint(account, via);
   var at = DateTime.UtcNow;
   account.LastLoginAt = at;
   App.Setting<AccountsSetup>().Events.SignedIn(account, at);
-  return Security.IssueJwt(account.Id, account.Email);
+  return ticket;
+}
+
+/// SECURITY-INVARIANT(sign-in-strength-at-the-one-mint): the ONE place this kit calls `Security.IssueJwt` — every sign-in
+/// (`AdmitBy`) and the fresh ticket of a changed or removed password. It refuses an account a rule binds that `via` did not
+/// come through (`RefuseOffTheRule`), and an account that must use two-step sign-in (`SecondFactorRequired`) unless THIS
+/// sign-in proved a step that counts (`RefuseWithoutTheSecondStep`); a ticket of an account whose sign-in may last fewer than
+/// 12 hours (`SignInHoursOf`) ends that long from now. The platform's mint holds the app's own two-step rule and hours again
+/// beneath it, and under that rule mints for no other code. Guarded by tests/sign-in-strength.test.osy and
+/// Platform.Tests SignInStrengthMintSiteGuardTests.every_kit_ticket_is_minted_in_one_place.
+[Authorize(IsAuthenticator)]
+internal string Mint(User account, SignInWay via) {
+  RefuseOffTheRule(account, via);
+  RefuseWithoutTheSecondStep(account, via);
+  var hours = SignInHoursOf(account);
+  DateTime? end = null;
+  if (hours < 12) { end = DateTime.UtcNow.AddHours(hours); }
+  return Security.IssueJwt(account.Id, account.Email, end, via.SecondStep);
+}
+
+/// Must `account` use two-step sign-in: the app's `SecondFactor.Required` says so, the app's sign-in needs it of everybody
+/// (`SecondFactorForAll`, as the platform's mint reads it, an organisation's lock applied), or the app's `SignInRules` adds it.
+/// Asked wherever the kit decides on a second step — the prompt to set one up, the refusal to turn it off, the account
+/// page and the mint — so they never disagree.
+bool SecondFactorRequired(User account) {
+  var setup = App.Setting<AccountsSetup>();
+  return setup.SecondFactor.Required(account) || Security.SignInStepRequired() || setup.SignInRules.SecondFactorForAll(account);
+}
+
+/// The most hours a sign-in of `account` may last, by the app's `SignInRules` (1–12; anything else reads as 1, there is no
+/// "no cap"). The app's own `SignInHours` is held by the platform's mint, which reads it with the organisation's range applied.
+int SignInHoursOf(User account) {
+  var hours = App.Setting<AccountsSetup>().SignInRules.SignInHours(account);
+  if (hours < 1 || hours > 12) { return 1; }
+  return hours;
+}
+
+/// Refuse a ticket for `account`, which must use two-step sign-in, when THIS sign-in proved no step that counts: an
+/// authenticator or recovery code, a passkey, or a counted provider factor. A texted code never does
+/// (SECURITY-INVARIANT accounts-sms-is-not-a-required-second-factor).
+void RefuseWithoutTheSecondStep(User account, SignInWay via) {
+  if (!StepMeetsTheRule(account, via.SecondStep)) {
+    throw new ValidationException("Two-step sign-in is required here — sign in again.");
+  }
+}
+
+/// Does a sign-in whose second step was `step` meet what `account` must show: a step that counts, or none needed?
+bool StepMeetsTheRule(User account, string step) {
+  if (StepCounts(step)) { return true; }
+  return !SecondFactorRequired(account);
+}
+
+/// The second steps that count where two-step sign-in is required: an authenticator or recovery code ("app"), a passkey, or a
+/// counted provider factor. A texted code never does. The one list: `StepMeetsTheRule` and `StepCountsAsPresence` both ask it.
+bool StepCounts(string step) {
+  return step == "app" || step == "passkey" || step == "provider";
+}
+
+/// The ways that prove a person is present for an act (`ProvePresence`): the steps that count (`StepCounts`), less a provider's
+/// — there is no fresh provider ceremony at an act. A recovery code is never asked there: "app" is the authenticator's code.
+public bool StepCountsAsPresence(string way) {
+  return way != "provider" && StepCounts(way);
+}
+
+/// The authenticator step the signed-in account's current `code` is, for a presence: past its last used step
+/// (`TotpLastStep`), so a code that signed in or proved once proves nothing again. -1 for a code that does not fit, -2 for an
+/// account with no authenticator. Never a recovery code. Reads the account's own sealed key, and nobody else's.
+[SuppressWarning("security-read-via-asks-about-one-row")]   // the signed-in account's own key, against the code it typed
+long PresenceCodeStep(string code) {
+  var me = Session.CurrentUser;
+  if (me == null) { return -1; }
+  var account = User.Single(u => u.Id == me.Id);
+  var stored = account.TotpSecret;
+  if (stored == null) { return -2; }
+  return Totp.Verify(Crypto.Decrypt(stored), code, account.TotpLastStep);
 }
 
 /// Does `code` prove the second factor — the authenticator's code for a step after the last one used, or an unspent
@@ -410,7 +551,12 @@ void RefuseWhenLockedOut(User account) {
   }
 }
 
-void RecordMiss(User account) { new SecondFactorMiss { Account = account, At = DateTime.UtcNow }; }
+/// Who counts a wrong code against an account: the sign-in flow, and a signed-in account's own code checks (a step-up, a
+/// change that asks its code), for its own account alone (`SecondFactorMiss`'s grant).
+policy RecordsMisses => IsAuthenticator || IsAuthenticated;
+
+[Server, Authorize(RecordsMisses)]
+internal void RecordMiss(User account) { new SecondFactorMiss { Account = account, At = DateTime.UtcNow }; }
 
 /// Ten fresh recovery codes for the account, `xxxxx-xxxxx`; every unspent code it had stops working.
 [SuppressWarning("cost-unbounded-read")]   // one account's unspent recovery codes — ten at most
