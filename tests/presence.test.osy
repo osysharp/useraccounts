@@ -114,7 +114,7 @@ void password_without_code_refused_when_two_step() {
 [Test(PresenceDesk)]
 void no_passkey_and_no_two_step_gives_no_presence() {
   runas (Bo) {
-    Assert.Equal("Add a passkey or two-step sign-in to approve deploys.",
+    Assert.Equal("Add a passkey or two-step sign-in to approve this.",
                  Assert.Throws<ValidationException>(() => Osysharp.UserAccounts.ProvePresence(ActX(), "", "", "correct-horse-2", "123456")).Message);
   }
 }
@@ -193,7 +193,7 @@ void a_recovery_or_texted_code_gives_no_presence() {
   }
   // Cy's texted second step is no presence, whatever code she types.
   runas (Cy) {
-    Assert.Equal("Add a passkey or two-step sign-in to approve deploys.",
+    Assert.Equal("Add a passkey or two-step sign-in to approve this.",
                  Assert.Throws<ValidationException>(() => Osysharp.UserAccounts.ProvePresence(ActX(), "", "", "correct-horse-3", "123456")).Message);
   }
 }

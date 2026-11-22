@@ -1,5 +1,12 @@
 # Osysharp.UserAccounts — changes
 
+## 2.0.1
+- A presence refused for want of a factor says "Add a passkey or two-step sign-in to approve this." — the kit's own words
+  for any act an app asks presence for. 2.0.0 said "…to approve deploys", one app's act, to every app.
+- The presence refusals (`StartPresence`, `ProvePresence`, an act presence is not proven for) and "Two-step sign-in is
+  required here — sign in again." are translated into Swedish and Arabic in the kit, so an app that speaks either has
+  nothing of the kit's left to translate.
+
 ## 2.0.0
 The code step of a sign-in answers a `SignInStep` in place of a ticket string, so it can say "set a factor up next". The
 calls that changed (the old spelling is gone; nothing forwards to it):

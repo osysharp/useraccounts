@@ -207,7 +207,7 @@ public string ProvePresence(string act, string passkeyToken = "", string passkey
     var step = PresenceCodeStep(code);
     if (step == -2) {
       if (PasskeyCredential.Any(p => p.Account == me)) { throw new ValidationException("This account has no authenticator app — approve with your passkey."); }
-      throw new ValidationException("Add a passkey or two-step sign-in to approve deploys.");
+      throw new ValidationException("Add a passkey or two-step sign-in to approve this.");
     }
     if (code.Trim() == "") { throw new ValidationException("Type the current code from your authenticator app as well."); }
     if (step < 0) {
@@ -218,7 +218,7 @@ public string ProvePresence(string act, string passkeyToken = "", string passkey
     me.TotpLastStep = step;
     way = "app";
   }
-  if (!StepCountsAsPresence(way)) { throw new ValidationException("Add a passkey or two-step sign-in to approve deploys."); }
+  if (!StepCountsAsPresence(way)) { throw new ValidationException("Add a passkey or two-step sign-in to approve this."); }
   DropSpentPresence();
   var proof = Security.RandomId(32);
   new PresenceProof { Account = me, ActHash = actHash, TokenHash = TokenHash(proof), Way = way, ExpiresAt = now + PresenceLifetime() };
