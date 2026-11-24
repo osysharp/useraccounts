@@ -4,10 +4,31 @@
 // Source language: en.
 
 translations ar {
+  // ── AccountAddressChangeAskedMail ──
+  /// AccountAddressChangeAskedMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {askedBy} = askedBy (string), {newAddress} = newAddress (string)
+  /// shown through EmailLayout.preview
+  mailPreview "{askedBy} asked to move your account to {newAddress}." => "طلب {askedBy} نقل حسابك إلى {newAddress}.";
+  /// AccountAddressChangeAskedMail · text on the page
+  /// shown through EmailText.text
+  /// beside: "Your address is changing", "This wasn't me — cancel the change"
+  text "If you did not ask for this, cancel it: the move is called off, and every browser signed in to your account is signed out." => "إن لم تطلب ذلك، فألغِه: يتوقف النقل، ويُسجَّل خروج كل متصفح مسجَّل الدخول إلى حسابك.";
+  /// AccountAddressChangeAskedMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through EmailNote.text
+  /// beside: "Your address is changing", "If you did not ask for this, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
+  text "The link works once. Then tell {AccountsAppName} at once." => "يعمل الرابط مرة واحدة. ثم أبلغ {AccountsAppName} فورًا.";
+  /// AccountAddressChangeAskedMail · text on the page
+  /// placeholders: {askedBy} = askedBy (string), {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string), {newAddress} = newAddress (string)
+  /// shown through EmailText.text
+  /// beside: "Your address is changing", "If you did not ask for this, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
+  text "{askedBy} at {AccountsAppName} asked to move the account for {account.Email} to {newAddress}. Until that address confirms it, you go on signing in with this one." => "طلب {askedBy} في {AccountsAppName} نقل الحساب {account.Email} إلى {newAddress}. وإلى أن يؤكد ذلك العنوان النقل، تواصل تسجيل الدخول بهذا العنوان.";
+
   // ── AccountAddressChangeMail ──
   /// AccountAddressChangeMail · a button's label · at most ~48 characters
   /// shown through EmailButton.label
   /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "Then choose a new password: whoever asked knows it. The link works once."
+  /// also in AccountAddressChangeAskedMail
   button "This wasn't me — cancel the change" => "لم أكن أنا، ألغِ التغيير";
   /// AccountAddressChangeMail · the preview line an inbox shows beside an email's subject
   /// placeholders: {newAddress} = newAddress (string)
@@ -15,6 +36,7 @@ translations ar {
   mailPreview "A request to sign in with {newAddress} instead." => "طلب لتسجيل الدخول باستخدام {newAddress} بدلًا من ذلك.";
   /// AccountAddressChangeMail · an email's subject line
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// also in AccountAddressChangeAskedMail
   mailSubject "Your {AccountsAppName} address is changing" => "عنوانك في {AccountsAppName} يتغير";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailText.text
@@ -31,6 +53,7 @@ translations ar {
   text "Then choose a new password: whoever asked knows it. The link works once." => "ثم اختر كلمة مرور جديدة: من طلب التغيير يعرفها. يعمل الرابط مرة واحدة.";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailHeading.text
+  /// also in AccountAddressChangeAskedMail
   text "Your address is changing" => "عنوانك يتغير";
 
   // ── AccountAddressChangedMail ──
@@ -105,6 +128,7 @@ translations ar {
   /// shown through EmailText.text
   /// beside: "Confirm your address", "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes."
   /// also in AccountVerifyMail
+  /// also in AccountVerifyAskedMail
   /// also in AccountStepUpMail
   text "Type this code where you were asked for it: {code}" => "اكتب هذا الرمز حيث طُلب منك: {code}";
 
@@ -696,6 +720,17 @@ translations ar {
   /// also in AccountSecondFactorMail
   text "Signing in to {AccountsAppName} as {account.Email} now asks only for the password." => "يطلب تسجيل الدخول إلى {AccountsAppName} باسم {account.Email} الآن كلمة المرور فقط.";
 
+  // ── AccountVerifyAskedMail ──
+  /// AccountVerifyAskedMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Confirm your new address", "Confirm my new address"
+  text "The code works for fifteen minutes, the link for three days. If this is not your account, ignore this mail — nothing changes." => "يعمل الرمز خمس عشرة دقيقة، والرابط ثلاثة أيام. إن لم يكن هذا حسابك، فتجاهل هذه الرسالة — لن يتغير شيء.";
+  /// AccountVerifyAskedMail · text on the page
+  /// placeholders: {askedBy} = askedBy (string), {AccountsAppName} = AccountsAppName(…) (string), {address} = address (string)
+  /// shown through EmailText.text
+  /// beside: "Confirm your new address", "Confirm my new address", "The code works for fifteen minutes, the link for three days. If this is not your account, ignore this mail — nothing changes."
+  text "{askedBy} at {AccountsAppName} asked to move your account to {address}. Confirm it is yours, and your account moves to it." => "طلب {askedBy} في {AccountsAppName} نقل حسابك إلى {address}. أكّد أن العنوان لك، فيُنقل حسابك إليه.";
+
   // ── AccountVerifyMail ──
   /// AccountVerifyMail · a button's label · at most ~26 characters
   /// shown through EmailButton.label
@@ -704,16 +739,19 @@ translations ar {
   /// AccountVerifyMail · a button's label · at most ~31 characters
   /// shown through EmailButton.label
   /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  /// also in AccountVerifyAskedMail
   button "Confirm my new address" => "تأكيد عنواني الجديد";
   /// AccountVerifyMail · the preview line an inbox shows beside an email's subject
   /// placeholders: {code} = code (string)
   /// shown through EmailLayout.preview
+  /// also in AccountVerifyAskedMail
   mailPreview "Your code is {code} — or one click and it is confirmed." => "رمزك هو {code}، أو انقر مرة واحدة ليتم التأكيد.";
   /// AccountVerifyMail · an email's subject line
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
   mailSubject "Confirm your address for {AccountsAppName}" => "أكّد عنوانك في {AccountsAppName}";
   /// AccountVerifyMail · an email's subject line
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// also in AccountVerifyAskedMail
   mailSubject "Confirm your new address for {AccountsAppName}" => "أكّد عنوانك الجديد في {AccountsAppName}";
   /// AccountVerifyMail · text on the page
   /// placeholders: {address} = address (string), {AccountsAppName} = AccountsAppName(…) (string)
@@ -723,6 +761,7 @@ translations ar {
   /// AccountVerifyMail · text on the page
   /// shown through EmailHeading.text
   /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  /// also in AccountVerifyAskedMail
   text "Confirm your new address" => "أكّد عنوانك الجديد";
   /// AccountVerifyMail · text on the page
   /// shown through EmailNote.text
@@ -843,18 +882,21 @@ translations ar {
   // ── ChangeAddressFor ──
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
+  /// also in AskAddressFor
   error "Another account already uses that address." => "هذا العنوان مستخدم بالفعل في حساب آخر.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
+  /// also in AskAddressFor
   error "Say why the address is changed — how you know it is their account." => "اذكر سبب تغيير العنوان — وكيف تعرف أنه حسابهم.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
+  /// also in AskAddressFor
   /// also in GiveManagedAccountAnAddress
   /// also in SignUpAtDoor
-  /// also in MailDoorCode
   error "That does not look like an email address." => "لا يبدو هذا عنوان بريد إلكتروني.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
+  /// also in AskAddressFor
   error "That is already the account's address." => "هذا هو عنوان الحساب بالفعل.";
 
   // ── ChangeTitle ──
@@ -1083,12 +1125,16 @@ translations ar {
   // ── Osysharp.UserAccounts.AddressChangeState ──
   /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~11 characters
   /// shown through Osysharp.UserAccounts.AddressChangeState.Moved
-  /// beside: "Moving the account"
+  /// beside: "Moving the account", "Waiting for the new address"
   label "Moved" => "تم النقل";
   /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~26 characters
   /// shown through Osysharp.UserAccounts.AddressChangeState.Moving
-  /// beside: "Moved"
+  /// beside: "Moved", "Waiting for the new address"
   label "Moving the account" => "جارٍ نقل الحساب";
+  /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~38 characters
+  /// shown through Osysharp.UserAccounts.AddressChangeState.Asked
+  /// beside: "Moving the account", "Moved"
+  label "Waiting for the new address" => "بانتظار العنوان الجديد";
 
   // ── Osysharp.UserAccounts.CodeChannel ──
   /// Osysharp.UserAccounts.CodeChannel · a label (a field, a list item, a menu entry) · at most ~11 characters

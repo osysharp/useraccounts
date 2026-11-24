@@ -170,6 +170,7 @@ public string ProvePresence(string act, string passkeyToken = "", string passkey
   var now = DateTime.UtcNow;
   var actHash = PresenceActHash(act);
   var way = "";
+  string? credential = null;
   if (passkeyResponse != "") {
     var ceremony = PasskeyCeremony.FirstOrDefault(c => c.TokenHash == TokenHash(passkeyToken));
     if (ceremony == null || ceremony.ActHash != actHash || ceremony.Account == null || ceremony.Account.Id != me.Id
@@ -198,6 +199,7 @@ public string ProvePresence(string act, string passkeyToken = "", string passkey
     key.SignCount = count;
     key.LastUsedAt = now;
     way = "passkey";
+    credential = key.CredentialId;
   } else {
     if (!PresencePasswordFits(password)) {
       new SecondFactorMiss { Account = me, At = DateTime.UtcNow };
@@ -221,7 +223,8 @@ public string ProvePresence(string act, string passkeyToken = "", string passkey
   if (!StepCountsAsPresence(way)) { throw new ValidationException("Add a passkey or two-step sign-in to approve this."); }
   DropSpentPresence();
   var proof = Security.RandomId(32);
-  new PresenceProof { Account = me, ActHash = actHash, TokenHash = TokenHash(proof), Way = way, ExpiresAt = now + PresenceLifetime() };
+  new PresenceProof { Account = me, ActHash = actHash, TokenHash = TokenHash(proof), Way = way, CredentialId = credential,
+                      ExpiresAt = now + PresenceLifetime() };
   UnitOfWork.Commit();
   return proof;
 }

@@ -15,6 +15,11 @@ public class AccountMails {
   public virtual RenderedEmail Verification(User account, string address, string link, bool isChange, string code) {
     return AccountVerifyMail(account, address, link, isChange, code);
   }
+  /// What proves `address` — a link and a six-digit `code` — when somebody who looks after the app's people (`askedBy`, by
+  /// name) asked to move the account there (`AskAddressFor`): the account moves when it is confirmed. Not "you asked".
+  public virtual RenderedEmail VerificationAskedFor(User account, string address, string link, string code, string askedBy) {
+    return AccountVerifyAskedMail(account, address, link, code, askedBy);
+  }
   /// To an address somebody tried to sign up with, when it already has an account — in place of a code, so the sign-up
   /// page never has to say so.
   public virtual RenderedEmail AccountExists(string address, string signInLink, string resetLink) {
@@ -38,6 +43,12 @@ public class AccountMails {
   /// (`ChangeAddressFor`) — how its owner finds out, whoever asked. Nothing to click: the change is made.
   public virtual RenderedEmail AddressChangedFor(User account, string oldAddress, string newAddress) {
     return AccountAddressChangedMail(account, oldAddress, newAddress);
+  }
+  /// To the OLD address, when somebody who looks after the app's people (`askedBy`, by name) asked to move the account to
+  /// `newAddress` and it waits for that address to confirm (`AskAddressFor`) — and `cancelLink` (single-use) calls the
+  /// move off and signs every browser out.
+  public virtual RenderedEmail AddressChangeAskedFor(User account, string newAddress, string askedBy, string cancelLink) {
+    return AccountAddressChangeAskedMail(account, newAddress, askedBy, cancelLink);
   }
   /// To the NEW address, when the account was moved there for its owner (`ChangeAddressFor`) — a welcome, nothing to
   /// click.
@@ -113,6 +124,20 @@ public component AccountVerifyMail(User account, string address, string link, bo
 }
 
 [Email]
+public component AccountVerifyAskedMail(User account, string address, string link, string code, string askedBy) {
+  subject => $"Confirm your new address for {AccountsAppName()}";
+  render {
+    EmailLayout(AccountsAppName(), preview: $"Your code is {code} — or one click and it is confirmed.") {
+      EmailHeading("Confirm your new address");
+      EmailText($"{askedBy} at {AccountsAppName()} asked to move your account to {address}. Confirm it is yours, and your account moves to it.");
+      EmailText($"Type this code where you were asked for it: {code}");
+      EmailButton("Confirm my new address", link);
+      EmailNote("The code works for fifteen minutes, the link for three days. If this is not your account, ignore this mail — nothing changes.");
+    }
+  }
+}
+
+[Email]
 public component AccountExistsMail(string address, string signInLink, string resetLink) {
   subject => $"You already have an account with {AccountsAppName()}";
   render {
@@ -169,6 +194,20 @@ public component AccountAddressChangeMail(User account, string newAddress, strin
         EmailButton("This wasn't me — cancel the change", cancelLink);
         EmailNote("Then choose a new password: whoever asked knows it. The link works once.");
       }
+    }
+  }
+}
+
+[Email]
+public component AccountAddressChangeAskedMail(User account, string newAddress, string askedBy, string cancelLink) {
+  subject => $"Your {AccountsAppName()} address is changing";
+  render {
+    EmailLayout(AccountsAppName(), preview: $"{askedBy} asked to move your account to {newAddress}.") {
+      EmailHeading("Your address is changing");
+      EmailText($"{askedBy} at {AccountsAppName()} asked to move the account for {account.Email} to {newAddress}. Until that address confirms it, you go on signing in with this one.");
+      EmailText("If you did not ask for this, cancel it: the move is called off, and every browser signed in to your account is signed out.");
+      EmailButton("This wasn't me — cancel the change", cancelLink);
+      EmailNote($"The link works once. Then tell {AccountsAppName()} at once.");
     }
   }
 }

@@ -12,6 +12,12 @@
 //   (`policy ChangesAccountsFor => IsDesk;`) — and a change is made only by `ChangeAddressFor`, which checks the address
 //   and the reason first (`deny create except via ChangeAddressFor`). The address itself is written by
 //   the change's run, never by the desk's own context (Osysharp.Identity's `deny update Email when !IsAuthenticator`).
+// ⚑ A CHANGE THE NEW ADDRESS MUST PROVE (`AskAddressFor`) is the other kind: somebody who looks after the people moves an
+//   account WITHOUT vouching for the new address — an operator console, where nobody stands at a desk. Its run trusts the
+//   new address no more than the person's own change would: an account whose address was never proven gets the new one in
+//   its place, still unproven, and a fresh proof mailed to it (every link and code to the old one spent, every session
+//   ended); an account whose address IS proven keeps signing in with it, the new one is mailed a confirmation, and the old
+//   one is told who asked and gets the link that calls it off — exactly the person's own `ChangeEmail`, named.
 
 namespace Osysharp.UserAccounts;
 
@@ -23,10 +29,18 @@ using Osysharp.Workflow;
 /// (`policy ChangesAccountsFor => IsDesk;`).
 virtual policy ChangesAccountsFor => false;
 
+/// Who may ask to move somebody else's account to a new address that must be PROVEN before the account signs in with it
+/// (`AskAddressFor`) — nobody, until the app says so, or a kit built on this one for its own run alone
+/// (`policy AsksAddressChangesFor += user == Actor.Of<AccessChanger>();`, the user manager's audited change).
+[Extensible] virtual policy AsksAddressChangesFor => false;
+
 /// Where a desk's address change stands — tracked by `AssistedAddressChange`. ⚠ Appended, never inserted.
 public enum AddressChangeState {
   [Label("Moving the account")] Moving,
   [Label("Moved")] Moved,
+  /// A change the new address must prove, of an account whose address is proven: the confirmation is mailed to the new
+  /// address and the account moves when it is opened (`ConfirmAddressChange`), unless the old one calls it off first.
+  [Label("Waiting for the new address")] Asked,
 }
 
 /// A change of address somebody who looks after the app's people made for an account: the record of who moved it, when,
@@ -50,10 +64,15 @@ public entity AddressChangeRequest {
   [CreatedBy] Guid? MadeBy;
   [CreatedAt] DateTime MadeAt;
   AddressChangeState State;                            // no default — AssistedAddressChange owns it
+  /// True for a change the new address must prove before the account signs in with it (`AskAddressFor`); false for the
+  /// desk's, which vouches for it.
+  bool MustProve = false;
+  /// Who asked, as the old address's notice names them (`AskAddressFor`'s `askedBy`) — "" for the desk's own change.
+  [MaxLength(255)] string AskedBy = "";
   security {
-    allow read when IsAuthenticator || ChangesAccountsFor;
-    allow create when ChangesAccountsFor;
-    deny create except via ChangeAddressFor;
+    allow read when IsAuthenticator || ChangesAccountsFor || AsksAddressChangesFor;
+    allow create when ChangesAccountsFor || AsksAddressChangesFor;
+    deny create except via ChangeAddressFor, AskAddressFor;
   }
 }
 
@@ -70,6 +89,32 @@ public void ChangeAddressFor(User account, string newAddress, string reason) {
   new AddressChangeRequest { Account = account, NewAddress = address, Reason = reason.Trim() };
 }
 
+/// Move `account` to `newAddress` for its owner WITHOUT vouching for it, giving `reason` and naming `askedBy` (the person
+/// who asked, as the old address's notice says it): recorded like the desk's change, and its run trusts the new address
+/// only once it is proven —
+///   - an account whose address was never proven gets `newAddress` in its place, still unproven: a fresh link and code go
+///     to it, every link and code to the old address is spent, and every session the account has ends;
+///   - an account whose address IS proven keeps signing in with it: a confirmation goes to `newAddress`, the account moves
+///     when it is opened (and every session ends then, `ConfirmAddressChange`), and the OLD address is told who asked,
+///     with the link that calls the move off (`CancelAddressChange`).
+/// Throws the sentence to show for an address that is not one, is the account's own, or another account already uses,
+/// and for a change with no reason.
+///
+/// SECURITY-INVARIANT(accounts-an-asked-address-is-trusted-only-once-proven): a change made through `AskAddressFor` never
+/// marks an address proven, never lets a proven account sign in with an address that has not confirmed it, and always
+/// tells a proven old address who asked, with a way to call it off. Guarded by tests/assisted-change.test.osy
+/// (an_asked_change_replaces_an_unproven_address_and_proves_nothing,
+/// an_asked_change_of_a_proven_account_waits_for_the_new_address_and_tells_the_old).
+[Server, Authorize(AsksAddressChangesFor)]
+public void AskAddressFor(User account, string newAddress, string reason, string askedBy) {
+  var address = NormalisedEmail(newAddress);
+  if (!LooksLikeEmail(address)) { throw new ValidationException("That does not look like an email address."); }
+  if (address == account.Email) { throw new ValidationException("That is already the account's address."); }
+  if (Principal.Any(p => p.Email == address)) { throw new ValidationException("Another account already uses that address."); }
+  if (reason.Trim() == "") { throw new ValidationException("Say why the address is changed — how you know it is their account."); }
+  new AddressChangeRequest { Account = account, NewAddress = address, Reason = reason.Trim(), MustProve = true, AskedBy = askedBy.Trim() };
+}
+
 /// The desk's recorded change moves the account to its new address — one of the three ways an account's address changes
 /// (`User`'s `deny update Email except via …`). Called by the change's own run and by nothing else: in a request, where
 /// the caller is asked, Osysharp.Identity's `deny update Email when !IsAuthenticator` refuses the desk's own context.
@@ -81,7 +126,8 @@ void MoveAccountForTheDesk(AddressChangeRequest change) {
 
 /// The desk's recorded change spends every change of address the person had started themselves and not yet confirmed —
 /// one of the two ways a pending change is spent from outside the sign-in flow (`EmailCheck`'s `deny update UsedAt,
-/// CancelledAt … except via …`). Called by the change's own run and by nothing else.
+/// CancelledAt … except via …`) — and, with `proofsToo` (an unproven address replaced), every link proving the old
+/// address as well, so the old pending proof dies with the address. Called by the change's own run and by nothing else.
 ///
 /// SECURITY-INVARIANT(accounts-a-desk-move-spends-the-persons-pending-change): after the desk moves an account, no
 /// confirmation link the person was mailed for a change of their own can move it again. The spend is written here, in a
@@ -90,11 +136,44 @@ void MoveAccountForTheDesk(AddressChangeRequest change) {
 /// tests/assisted-change.test.osy (a_change_the_person_had_started_elsewhere_is_spent_by_the_desks).
 [Server, Authorize(ChangesAccountsFor)]
 [SuppressWarning("cost-unbounded-read")]   // one account's outstanding address links
-void SpendPendingChangesForTheDesk(User account) {
+void SpendPendingChangesForTheDesk(User account, bool proofsToo = false) {
   var now = DateTime.UtcNow;
-  foreach (var pending in EmailCheck.Where(c => c.Account == account && c.IsChange && c.UsedAt == null).ToList()) {
+  foreach (var pending in EmailCheck.Where(c => c.Account == account && (c.IsChange || proofsToo) && c.UsedAt == null).ToList()) {
     pending.UsedAt = now;
   }
+}
+
+/// An asked change of an account whose address was never proven: the new address takes the old one's place, unproven —
+/// every link and code to the old one spent, every session ended, and a fresh link and code mailed to the new one.
+[SuppressWarning("cost-unbounded-read")]   // one account's outstanding address codes
+void ReplaceAnUnprovenAddress(AddressChangeRequest change) {
+  var account = change.Account;
+  change.OldAddress = account.Email;
+  MoveAccountForTheDesk(change);
+  SpendPendingChangesForTheDesk(account, true);
+  var now = DateTime.UtcNow;
+  foreach (var code in OneTimeCode.Where(c => c.Account == account && c.Purpose == CodePurpose.ProveAddress && c.UsedAt == null).ToList()) {
+    code.UsedAt = now;
+  }
+  // SECURITY-INVARIANT(sessions-valid-from-the-accounts-last-change): the address that signs in moved.
+  Security.EndOtherSessions(account.Id);
+  EndPresenceOf(account.Id);
+  if (MayMailACheck(account, change.NewAddress)) { SendCheck(account, change.NewAddress, false); }
+}
+
+/// An asked change of an account whose address IS proven: nothing moves yet. The new address is mailed a confirmation
+/// (the account moves when it is opened), and the old one is told who asked, with the link that calls it off — the
+/// person's own `ChangeEmail`, with the name of who asked in place of "somebody signed in as you".
+void AskTheNewAddress(AddressChangeRequest change) {
+  var account = change.Account;
+  change.OldAddress = account.Email;
+  var taken = Principal.Any(p => p.Email == change.NewAddress && p.Id != account.Id);
+  var check = IssueEmailCheck(account, change.NewAddress, true, mail: !taken && MayMailACheck(account, change.NewAddress),
+                              askedBy: change.AskedBy);
+  var cancelToken = Security.RandomId(32);
+  check.CancelTokenHash = TokenHash(cancelToken);
+  SendRendered(account.Email, App.Setting<AccountsSetup>().Mails.AddressChangeAskedFor(account, change.NewAddress, change.AskedBy,
+               AccountsLink($"/cancel-address-change/{cancelToken}")));
 }
 
 /// Moves the account and tells both addresses — as the system, in the commit that made the change.
@@ -105,6 +184,15 @@ public workflow AssistedAddressChange {
 
   state Moving {
     enter {
+      // A change the new address must prove vouches for nothing: an unproven address is replaced, a proven one waits.
+      if (this.Item.MustProve && this.Item.Account.EmailVerifiedAt == null) {
+        ReplaceAnUnprovenAddress(this.Item);
+        goto Moved;
+      }
+      if (this.Item.MustProve) {
+        AskTheNewAddress(this.Item);
+        goto Asked;
+      }
       var account = this.Item.Account;
       var old = account.Email;
       this.Item.OldAddress = old;
@@ -122,4 +210,5 @@ public workflow AssistedAddressChange {
   }
 
   terminal success Moved { }
+  terminal success Asked { }
 }

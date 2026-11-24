@@ -768,7 +768,8 @@ User Prove(EmailCheck check) {
 ///
 /// SECURITY-INVARIANT(accounts-an-address-moves-only-when-the-new-one-confirms): no caller — the account itself, the
 /// app's staff, a client's unit of work, an API call — writes `Email` on an account; it moves here, once the new address
-/// received the link or the code, or in the desk's recorded `ChangeAddressFor` run (AssistedChange.osy). Guarded by
+/// received the link or the code, or in the recorded run of the desk's `ChangeAddressFor` or of `AskAddressFor` (which
+/// replaces only an address never proven, and proves nothing: AssistedChange.osy). Guarded by
 /// tests/email.test.osy (an_address_changes_only_through_its_confirmation).
 [Server, Authorize(IsAuthenticator)]
 public void ConfirmAddressChange(EmailCheck check) {
@@ -807,14 +808,18 @@ public User Verified(string email, string password) {
 void SendCheck(User account, string address, bool isChange) { IssueEmailCheck(account, address, isChange); }
 
 /// `SendCheck`, answering the check it recorded — for a caller that offers a way to call it off. With `mail` false the
-/// check is recorded exactly as one that was mailed, and its link and code go nowhere: nobody can ever prove it.
-internal EmailCheck IssueEmailCheck(User account, string address, bool isChange, bool mail = true) {
+/// check is recorded exactly as one that was mailed, and its link and code go nowhere: nobody can ever prove it. With
+/// `askedBy`, the move was asked for by that person, not the account (`AskAddressFor`), and the mail says so.
+internal EmailCheck IssueEmailCheck(User account, string address, bool isChange, bool mail = true, string askedBy = "") {
   var token = Security.RandomId(32);
   var check = new EmailCheck { Account = account, Email = address, IsChange = isChange, TokenHash = TokenHash(token),
                                ExpiresAt = DateTime.UtcNow + VerificationLifetime() };
   var code = IssueCode(account, CodeChannel.Email, CodePurpose.ProveAddress, address, check: check);
   if (mail) {
-    SendRendered(address, App.Setting<AccountsSetup>().Mails.Verification(account, address, AccountsLink($"/verify-email/{token}"), isChange, code),
+    var mails = App.Setting<AccountsSetup>().Mails;
+    var link = AccountsLink($"/verify-email/{token}");
+    SendRendered(address, askedBy != "" ? mails.VerificationAskedFor(account, address, link, code, askedBy)
+                                        : mails.Verification(account, address, link, isChange, code),
                  "verify-" + TokenHash(token));
   }
   return check;

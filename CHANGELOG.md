@@ -1,5 +1,35 @@
 # Osysharp.UserAccounts — changes
 
+## 2.2.0
+- `AskAddressFor(account, newAddress, reason, askedBy)`: somebody who looks after the app's people moves an account to a new
+  address WITHOUT vouching for it — the desk's `ChangeAddressFor` still vouches, and applies at once. Who may is the new
+  `[Extensible] virtual policy AsksAddressChangesFor` (nobody by default; Osysharp.UserManagement adds its own run). Its run
+  (`AssistedAddressChange`, `AddressChangeRequest.MustProve`) trusts the new address only once it is proven:
+  - an account whose address was never proven gets the new one in its place, still unproven: a fresh link and code go to
+    it, every link and code to the old one is spent, and every session ends;
+  - an account whose address IS proven keeps signing in with it: the new one gets a confirmation (the account moves, and
+    every session ends, when it is opened), and the old one is told who asked (`AccountMails.AddressChangeAskedFor`,
+    `AccountAddressChangeAskedMail`) with the link that calls it off. The request's state is the new
+    `AddressChangeState.Asked` ("Waiting for the new address"), appended after `Moved`.
+  The confirmation to the new address names who asked (`AccountMails.VerificationAskedFor`, `AccountVerifyAskedMail`)
+  instead of saying "You asked".
+- The new mail's words are translated into Swedish and Arabic in the kit.
+
+## 2.1.0
+Presence can now say which factor answered and since when, so an app can decide for itself how young a factor may be. Nothing
+that was there changes:
+- `PresenceProof` keeps the id of the passkey that proved it: `CredentialId` (null for the authenticator-app way).
+- `PresenceFactorSince(proof)` is a new public read. For the signed-in account's own live, untaken proof it answers a
+  `PresenceFactor`: `Way` ("passkey" or "app") and `Since`, when that passkey was added (or the authenticator was turned on).
+  `Since` is null when that cannot be read; read null as "added just now". For a proof that is not live, taken, or someone
+  else's, `Way` is "" and `Since` null. It reads no secret and does not spend the proof: ask it before `TakePresence`.
+- The 72-hour rule is not in the kit. `TakePresence` and `ProvePresence` are unchanged: for an app's own acts a proof from a
+  factor added a minute ago passes exactly as before. Only Admin's organization approvals (votes, seats, gains) count a
+  passkey or authenticator once it is 72 hours old, by reading `PresenceFactorSince`; an organization's founding Owner is
+  excepted while the organization is under 72 hours old. An app that wants the same rule for an act of its own reads
+  `PresenceFactorSince` itself.
+- No app has to change. `use Osysharp.UserAccounts@2;` still takes this version.
+
 ## 2.0.1
 - A presence refused for want of a factor says "Add a passkey or two-step sign-in to approve this." — the kit's own words
   for any act an app asks presence for. 2.0.0 said "…to approve deploys", one app's act, to every app.

@@ -85,7 +85,9 @@ public entity User : Principal {
     deny read Phone when !IsAuthenticator where Id != user.Id;
     // SECURITY-INVARIANT(accounts-an-address-moves-only-when-the-new-one-confirms): the address that signs in — and that a
     // reset link goes to — changes only once the NEW address has confirmed it (`ConfirmAddressChange`, SignIn.osy),
-    // through the desk's recorded change (`MoveAccountForTheDesk`, called by AssistedChange.osy's run alone), or when the
+    // through the desk's recorded change (`MoveAccountForTheDesk`, called by AssistedChange.osy's run alone — which, for a
+    // change the new address must prove (`AskAddressFor`), replaces only an address that was never proven, and leaves the
+    // new one unproven: SECURITY-INVARIANT(accounts-an-asked-address-is-trusted-only-once-proven)), or when the
     // account is erased (`ForgetAccountAddress`, called by `EraseAccount` alone). The three functions below are every way
     // it changes: no workflow step or handler writes it either, the kit's own included. `Email` is Osysharp.Identity's;
     // this narrows it on every account the kit makes. Guarded by tests/email.test.osy, tests/assisted-change.test.osy and

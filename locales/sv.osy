@@ -4,10 +4,31 @@
 // Source language: en.
 
 translations sv {
+  // ── AccountAddressChangeAskedMail ──
+  /// AccountAddressChangeAskedMail · the preview line an inbox shows beside an email's subject
+  /// placeholders: {askedBy} = askedBy (string), {newAddress} = newAddress (string)
+  /// shown through EmailLayout.preview
+  mailPreview "{askedBy} asked to move your account to {newAddress}." => "{askedBy} har bett om att flytta ditt konto till {newAddress}.";
+  /// AccountAddressChangeAskedMail · text on the page
+  /// shown through EmailText.text
+  /// beside: "Your address is changing", "This wasn't me — cancel the change"
+  text "If you did not ask for this, cancel it: the move is called off, and every browser signed in to your account is signed out." => "Om du inte bad om det här, avbryt det: flytten stoppas och alla webbläsare som är inloggade på ditt konto loggas ut.";
+  /// AccountAddressChangeAskedMail · text on the page
+  /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// shown through EmailNote.text
+  /// beside: "Your address is changing", "If you did not ask for this, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
+  text "The link works once. Then tell {AccountsAppName} at once." => "Länken fungerar en gång. Säg sedan till {AccountsAppName} genast.";
+  /// AccountAddressChangeAskedMail · text on the page
+  /// placeholders: {askedBy} = askedBy (string), {AccountsAppName} = AccountsAppName(…) (string), {account.Email} = account.Email (string), {newAddress} = newAddress (string)
+  /// shown through EmailText.text
+  /// beside: "Your address is changing", "If you did not ask for this, cancel it: the move is called off, and every browser signed in to your account is signed out.", "This wasn't me — cancel the change"
+  text "{askedBy} at {AccountsAppName} asked to move the account for {account.Email} to {newAddress}. Until that address confirms it, you go on signing in with this one." => "{askedBy} hos {AccountsAppName} har bett om att flytta kontot för {account.Email} till {newAddress}. Tills den adressen har bekräftat det loggar du in med den här som vanligt.";
+
   // ── AccountAddressChangeMail ──
   /// AccountAddressChangeMail · a button's label · at most ~48 characters
   /// shown through EmailButton.label
   /// beside: "If this was not you, cancel it: the move is called off, and every browser signed in to your account is signed out.", "Then choose a new password: whoever asked knows it. The link works once."
+  /// also in AccountAddressChangeAskedMail
   button "This wasn't me — cancel the change" => "Det var inte jag, avbryt ändringen";
   /// AccountAddressChangeMail · the preview line an inbox shows beside an email's subject
   /// placeholders: {newAddress} = newAddress (string)
@@ -15,6 +36,7 @@ translations sv {
   mailPreview "A request to sign in with {newAddress} instead." => "En begäran om att logga in med {newAddress} i stället.";
   /// AccountAddressChangeMail · an email's subject line
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// also in AccountAddressChangeAskedMail
   mailSubject "Your {AccountsAppName} address is changing" => "Din adress hos {AccountsAppName} ändras";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailText.text
@@ -31,6 +53,7 @@ translations sv {
   text "Then choose a new password: whoever asked knows it. The link works once." => "Välj sedan ett nytt lösenord: den som bad om ändringen känner till det. Länken fungerar en gång.";
   /// AccountAddressChangeMail · text on the page
   /// shown through EmailHeading.text
+  /// also in AccountAddressChangeAskedMail
   text "Your address is changing" => "Din adress ändras";
 
   // ── AccountAddressChangedMail ──
@@ -105,6 +128,7 @@ translations sv {
   /// shown through EmailText.text
   /// beside: "Confirm your address", "The code works for fifteen minutes. If you did not ask, ignore this mail — nothing changes."
   /// also in AccountVerifyMail
+  /// also in AccountVerifyAskedMail
   /// also in AccountStepUpMail
   text "Type this code where you were asked for it: {code}" => "Skriv in den här koden där du blev ombedd: {code}";
 
@@ -696,6 +720,17 @@ translations sv {
   /// also in AccountSecondFactorMail
   text "Signing in to {AccountsAppName} as {account.Email} now asks only for the password." => "När du loggar in i {AccountsAppName} som {account.Email} krävs nu bara lösenordet.";
 
+  // ── AccountVerifyAskedMail ──
+  /// AccountVerifyAskedMail · text on the page
+  /// shown through EmailNote.text
+  /// beside: "Confirm your new address", "Confirm my new address"
+  text "The code works for fifteen minutes, the link for three days. If this is not your account, ignore this mail — nothing changes." => "Koden fungerar i femton minuter, länken i tre dagar. Om det här inte är ditt konto kan du strunta i mejlet — ingenting ändras.";
+  /// AccountVerifyAskedMail · text on the page
+  /// placeholders: {askedBy} = askedBy (string), {AccountsAppName} = AccountsAppName(…) (string), {address} = address (string)
+  /// shown through EmailText.text
+  /// beside: "Confirm your new address", "Confirm my new address", "The code works for fifteen minutes, the link for three days. If this is not your account, ignore this mail — nothing changes."
+  text "{askedBy} at {AccountsAppName} asked to move your account to {address}. Confirm it is yours, and your account moves to it." => "{askedBy} hos {AccountsAppName} har bett om att flytta ditt konto till {address}. Bekräfta att adressen är din, så flyttas kontot dit.";
+
   // ── AccountVerifyMail ──
   /// AccountVerifyMail · a button's label · at most ~26 characters
   /// shown through EmailButton.label
@@ -704,16 +739,19 @@ translations sv {
   /// AccountVerifyMail · a button's label · at most ~31 characters
   /// shown through EmailButton.label
   /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  /// also in AccountVerifyAskedMail
   button "Confirm my new address" => "Bekräfta min nya adress";
   /// AccountVerifyMail · the preview line an inbox shows beside an email's subject
   /// placeholders: {code} = code (string)
   /// shown through EmailLayout.preview
+  /// also in AccountVerifyAskedMail
   mailPreview "Your code is {code} — or one click and it is confirmed." => "Din kod är {code}, eller bekräfta med ett klick.";
   /// AccountVerifyMail · an email's subject line
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
   mailSubject "Confirm your address for {AccountsAppName}" => "Bekräfta din adress för {AccountsAppName}";
   /// AccountVerifyMail · an email's subject line
   /// placeholders: {AccountsAppName} = AccountsAppName(…) (string)
+  /// also in AccountVerifyAskedMail
   mailSubject "Confirm your new address for {AccountsAppName}" => "Bekräfta din nya adress för {AccountsAppName}";
   /// AccountVerifyMail · text on the page
   /// placeholders: {address} = address (string), {AccountsAppName} = AccountsAppName(…) (string)
@@ -723,6 +761,7 @@ translations sv {
   /// AccountVerifyMail · text on the page
   /// shown through EmailHeading.text
   /// beside: "The code works for fifteen minutes, the link for three days. If you did not ask, ignore this mail — nothing changes."
+  /// also in AccountVerifyAskedMail
   text "Confirm your new address" => "Bekräfta din nya adress";
   /// AccountVerifyMail · text on the page
   /// shown through EmailNote.text
@@ -843,18 +882,21 @@ translations sv {
   // ── ChangeAddressFor ──
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
+  /// also in AskAddressFor
   error "Another account already uses that address." => "Ett annat konto använder redan den adressen.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
+  /// also in AskAddressFor
   error "Say why the address is changed — how you know it is their account." => "Skriv varför adressen ändras — hur du vet att det är deras konto.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
+  /// also in AskAddressFor
   /// also in GiveManagedAccountAnAddress
   /// also in SignUpAtDoor
-  /// also in MailDoorCode
   error "That does not look like an email address." => "Det ser inte ut som en e-postadress.";
   /// ChangeAddressFor · an error message
   /// shown through ValidationException
+  /// also in AskAddressFor
   error "That is already the account's address." => "Det är redan kontots adress.";
 
   // ── ChangeTitle ──
@@ -1083,12 +1125,16 @@ translations sv {
   // ── Osysharp.UserAccounts.AddressChangeState ──
   /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~11 characters
   /// shown through Osysharp.UserAccounts.AddressChangeState.Moved
-  /// beside: "Moving the account"
+  /// beside: "Moving the account", "Waiting for the new address"
   label "Moved" => "Flyttat";
   /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~26 characters
   /// shown through Osysharp.UserAccounts.AddressChangeState.Moving
-  /// beside: "Moved"
+  /// beside: "Moved", "Waiting for the new address"
   label "Moving the account" => "Flyttar kontot";
+  /// Osysharp.UserAccounts.AddressChangeState · a label (a field, a list item, a menu entry) · at most ~38 characters
+  /// shown through Osysharp.UserAccounts.AddressChangeState.Asked
+  /// beside: "Moving the account", "Moved"
+  label "Waiting for the new address" => "Väntar på den nya adressen";
 
   // ── Osysharp.UserAccounts.CodeChannel ──
   /// Osysharp.UserAccounts.CodeChannel · a label (a field, a list item, a menu entry) · at most ~11 characters
