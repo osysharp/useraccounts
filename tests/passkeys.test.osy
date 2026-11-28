@@ -185,6 +185,23 @@ void adding_a_passkey_needs_proof_and_a_code_when_two_step_is_on() {
   Assert.Equal(1, PasskeysOf("ada@desk.test"));
 }
 
+// An address not yet confirmed and two-step sign-in on change nothing about an add: the passkey the finish answers for is
+// kept, on this account, and its own account page lists it.
+[Test(PasskeyDesk)]
+void an_add_with_an_unconfirmed_address_and_two_step_on_keeps_the_passkey_and_lists_it() {
+  runas (AuthBootstrap) { User.Single(u => u.Email == "ada@desk.test").EmailVerifiedAt = null; }
+  var totp = NewSecondFactorSetup("ada@desk.test").Key;
+  runas (AuthBootstrap) { EnableSecondFactor("ada@desk.test", "correct-horse-1", totp, Totp.Code(totp)); }
+  AddKey("ada@desk.test", "correct-horse-1", WebAuthn.NewTestKey(), "MacBook", Totp.Code(totp, DateTime.UtcNow.AddSeconds(30)));
+  Assert.Equal(1, PasskeysOf("ada@desk.test"));
+  Assert.Equal(0, PasskeysOf("eve@desk.test"));
+  runas (Ada) {
+    var mine = MyPasskeys().Passkeys;
+    Assert.Equal(1, mine.Count);
+    Assert.Equal("MacBook", mine[0].Name);
+  }
+}
+
 [Test(PasskeyDesk)]
 void the_last_way_in_is_never_removed() {
   var phone = WebAuthn.NewTestKey();
