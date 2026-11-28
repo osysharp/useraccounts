@@ -1,5 +1,14 @@
 # Osysharp.UserAccounts — changes
 
+## 2.2.1
+- Adding a passkey on the account page always says how it ended. When nothing was kept — the passkey prompt was closed or
+  timed out, the browser could not make one, or the app refused it — the page says "No passkey was added." and why, and
+  the list does not change. It still says so after the dialog closes: a Cancel, Escape or press outside made while the
+  device was asking used to close the dialog once the add had ended and take its answer with it, so a failed add looked
+  like one that worked. Each failure is also written to the app's log ("A passkey was not added: …").
+- Closing the passkey prompt while setting a passkey up at sign-in, or while confirming a change with a passkey, now
+  says nothing was added or changed, instead of nothing at all.
+
 ## 2.2.0
 - `AskAddressFor(account, newAddress, reason, askedBy)`: somebody who looks after the app's people moves an account to a new
   address WITHOUT vouching for it — the desk's `ChangeAddressFor` still vouches, and applies at once. Who may is the new

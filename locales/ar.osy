@@ -1211,6 +1211,17 @@ translations ar {
   /// shown through PasskeyLine()
   text "Added {added} · last used {used}" => "أُضيف في {added} · آخر استخدام {used}";
 
+  // ── PasskeyNotAddedLine ──
+  /// PasskeyNotAddedLine · message
+  /// placeholders: {why} = why (string)
+  /// shown through PasskeyNotAddedLine()
+  message "No passkey was added. {why}" => "لم يُضَف أي مفتاح مرور. {why}";
+
+  // ── PasskeyPromptClosed ──
+  /// PasskeyPromptClosed · message
+  /// shown through PasskeyPromptClosed()
+  message "Nothing was added — the passkey prompt was closed." => "لم يُضَف شيء — أُغلقت نافذة مفتاح المرور.";
+
   // ── PhoneForCallsLine ──
   /// PhoneForCallsLine · text on the page
   /// placeholders: {Trim} = newPhone.Trim(…) (string)

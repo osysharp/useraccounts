@@ -115,7 +115,7 @@ public component SignInForm(string then = "", string email = "", string password
     try {
       var first = AddPasskey("", "", "", "", "", enrolment);
       var made = Passkey.Create(first.Options);
-      if (made == "") { return; }
+      if (made == "") { problem = PasskeyPromptClosed(); return; }
       var done = AddPasskey("", "", "", "", "", enrolment, first.Token, made, "Passkey");
       Session.SignIn(done.Ticket, then != "" ? then : facts.HomePath);
     }
@@ -623,9 +623,12 @@ public component AccountSettings() {
   List<string> codes = [];
   string note = "";
   string problem = "";
+  // Why the last passkey add kept nothing. Closing the dialog leaves it: a Cancel, Escape or press outside made while
+  // the device was still asking runs only after the add has ended, and must not take its answer with it.
+  string notAdded = "";
 
   action Open(string which) {
-    change = which; problem = ""; note = ""; code = ""; textedCode = "";
+    change = which; problem = ""; note = ""; code = ""; textedCode = ""; notAdded = "";
     // A change with nothing to edit goes straight to its confirmation.
     step = which == "address" || which == "password" || which == "phone" || which == "passkey-add" || which == "passkey-rename"
       ? "edit" : "confirm";
@@ -679,7 +682,16 @@ public component AccountSettings() {
   action Done(string said) {
     twoStep = MySecondFactor(); address = MyAddress(); providers = MyProviders(); phone = MyPhone(); keys = MyPasskeys();
     Close();
+    notAdded = "";
     note = said;
+  }
+
+  // An add that kept no passkey: `line` is said in the dialog, and kept for the page once the dialog is closed.
+  action NotAdded(string line) {
+    Refused(line);
+    notAdded = line;
+    keys = MyPasskeys();
+    Log.Warning("A passkey was not added: {Why}", line);
   }
 
   action Confirm() {
@@ -747,7 +759,10 @@ public component AccountSettings() {
     try {
       var start = StartPasskeySignIn();
       var answer = Passkey.Get(start.Options);
-      if (answer == "") { return; }
+      if (answer == "") {
+        if (change == "passkey-add") { NotAdded(PasskeyPromptClosed()); } else { Refused("Nothing was changed — the passkey prompt was closed."); }
+        return;
+      }
       if (change == "passkey-add") {
         AddThePasskey(start.Token, answer);
       } else if (change == "passkey-remove") {
@@ -762,17 +777,20 @@ public component AccountSettings() {
         Done("Password sign-in is off. You sign in with your passkeys.");
       }
     }
-    catch (Exception ex) { Refused(ex.Message); }
+    catch (Exception ex) { if (change == "passkey-add") { NotAdded(PasskeyNotAddedLine(ex.Message)); } else { Refused(ex.Message); } }
   }
 
   /// The two halves of adding a passkey, once it is confirmed it is you — by the password and code, or by a passkey's
-  /// `token` and `answer`.
+  /// `token` and `answer`. Every way it ends without a passkey kept says so (`NotAdded`); only a kept one says it is added.
   action AddThePasskey(string token, string answer) {
     var who = Session.CurrentUser.Email;
-    var first = AddPasskey(who, token == "" ? current : "", token == "" ? code : "", token, answer);
-    var made = Passkey.Create(first.Options);
-    if (made == "") { Refused("Nothing was added — the passkey prompt was closed."); return; }
-    AddPasskey(who, "", "", "", "", "", first.Token, made, passkeyName);
+    try {
+      var first = AddPasskey(who, token == "" ? current : "", token == "" ? code : "", token, answer);
+      var made = Passkey.Create(first.Options);
+      if (made == "") { NotAdded(PasskeyPromptClosed()); return; }
+      AddPasskey(who, "", "", "", "", "", first.Token, made, passkeyName);
+    }
+    catch (Exception ex) { NotAdded(PasskeyNotAddedLine(ex.Message)); return; }
     Done("Your passkey is added. It signs you in from now on.");
   }
 
@@ -805,6 +823,7 @@ public component AccountSettings() {
       if (me != null) {
         if (note != "") { Alert(note, tone: Tone.Success); }
         if (problem != "" && change == "") { Alert(problem, tone: Tone.Danger); }
+        if (notAdded != "" && change == "") { Alert(notAdded, tone: Tone.Danger); }
         Stack(gap: 0) {
           SettingsSection("Address", description: "Where your mail goes, and how you sign in.") {
             Stack(gap: 3, pb: 5) {
@@ -1005,6 +1024,12 @@ public component AccountSettings() {
     }
   }
 }
+
+/// What a passkey prompt closed before it answered — dismissed, or timed out — means for an add.
+internal string PasskeyPromptClosed() { return "Nothing was added — the passkey prompt was closed."; }
+
+/// The sentence for an add that kept no passkey, given why: it says first that nothing was added.
+internal string PasskeyNotAddedLine(string why) { return $"No passkey was added. {why}"; }
 
 /// The title of the account page's dialog for `change`.
 string ChangeTitle(string change, string provider, bool hasPhone) {

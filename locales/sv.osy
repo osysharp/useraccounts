@@ -1211,6 +1211,17 @@ translations sv {
   /// shown through PasskeyLine()
   text "Added {added} · last used {used}" => "Tillagd {added} · senast använd {used}";
 
+  // ── PasskeyNotAddedLine ──
+  /// PasskeyNotAddedLine · message
+  /// placeholders: {why} = why (string)
+  /// shown through PasskeyNotAddedLine()
+  message "No passkey was added. {why}" => "Ingen nyckel lades till. {why}";
+
+  // ── PasskeyPromptClosed ──
+  /// PasskeyPromptClosed · message
+  /// shown through PasskeyPromptClosed()
+  message "Nothing was added — the passkey prompt was closed." => "Inget lades till – rutan för nyckeln stängdes.";
+
   // ── PhoneForCallsLine ──
   /// PhoneForCallsLine · text on the page
   /// placeholders: {Trim} = newPhone.Trim(…) (string)
